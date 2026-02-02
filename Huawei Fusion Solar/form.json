@@ -24,9 +24,5 @@
       "caption": "Jetzt aktualisieren",
       "onClick": "HFS_Update($id);"
     }
-  ],
-  "status": [
-    { "code": 102, "caption": "Aktiv" },
-    { "code": 201, "caption": "Fehler bei Kommunikation" }
   ]
 }
