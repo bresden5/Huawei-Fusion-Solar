@@ -6,7 +6,7 @@ class HuaweiFusionSolar extends IPSModule
     {
         parent::Create();
 
-        // === Eigene Profile anlegen ===
+        // === Profile ===
         $this->RegisterProfiles();
 
         // === Properties ===
@@ -14,14 +14,14 @@ class HuaweiFusionSolar extends IPSModule
         $this->RegisterPropertyString("Password", "");
         $this->RegisterPropertyInteger("UpdateInterval", 300);
 
-        // === Timer (korrekt für PHP & Symcon) ===
+        // === Timer (KORREKT & SYMCON-SAFE) ===
         $this->RegisterTimer(
             "UpdateTimer",
             0,
-            "HFS_Update(" . $this->InstanceID . ");"
+            "IPS_RequestAction(" . $this->InstanceID . ", 'Update', 0);"
         );
 
-        // === Basis-Variablen ===
+        // === Variablen ===
         $this->RegisterVariableFloat("TotalPV", "PV Gesamtleistung", "~Watt");
         $this->RegisterVariableFloat("HouseConsumption", "Hausverbrauch", "~Watt");
 
@@ -40,7 +40,16 @@ class HuaweiFusionSolar extends IPSModule
         $this->SetTimerInterval("UpdateTimer", $interval);
     }
 
-    // ================= PUBLIC =================
+    // ================= ACTION ROUTING =================
+
+    public function RequestAction($Ident, $Value)
+    {
+        if ($Ident === 'Update') {
+            $this->Update();
+        }
+    }
+
+    // ================= UPDATE =================
 
     public function Update()
     {
@@ -64,7 +73,7 @@ class HuaweiFusionSolar extends IPSModule
 
                 switch ($dev['devTypeId']) {
 
-                    // === Wechselrichter ===
+                    // Wechselrichter
                     case 1:
                         $power = (float)($map['active_power'] ?? 0);
                         $pvTotal += $power;
@@ -80,20 +89,19 @@ class HuaweiFusionSolar extends IPSModule
                         $this->SetValue($ident, $power);
                         break;
 
-                    // === Batterie ===
+                    // Batterie
                     case 39:
                         $batSOC   = (float)($map['soc'] ?? 0);
                         $batPower = (float)($map['charge_discharge_power'] ?? 0);
                         break;
 
-                    // === Netz ===
+                    // Netz
                     case 47:
                         $gridPower = (float)($map['active_power'] ?? 0);
                         break;
                 }
             }
 
-            // === Werte setzen ===
             $this->SetValue("TotalPV", $pvTotal);
             $this->SetValue("BatterySOC", $batSOC);
             $this->SetValue("BatteryPower", $batPower);
@@ -101,7 +109,6 @@ class HuaweiFusionSolar extends IPSModule
             $this->SetValue("GridImport", max($gridPower, 0));
             $this->SetValue("GridExport", max(-$gridPower, 0));
 
-            // === Hausverbrauch berechnen ===
             $house =
                 $pvTotal
                 + max($gridPower, 0)
@@ -198,7 +205,6 @@ class HuaweiFusionSolar extends IPSModule
 
         $data = json_decode($response, true);
 
-        // === Token abgelaufen ===
         if (($data['failCode'] ?? 0) === 305) {
             $this->SetBuffer("Token", "");
             $this->Login();
