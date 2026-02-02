@@ -1,0 +1,12 @@
+{
+    "id": "{3124DA38-EEEF-C297-30FC-D6B28541109D}",
+    "name": "Huawei Fusion Solar",
+    "type": 3,
+    "vendor": "",
+    "aliases": [],
+    "parentRequirements": [],
+    "childRequirements": [],
+    "implemented": [],
+    "prefix": "FUSION_SOLAR",
+    "url": ""
+}
