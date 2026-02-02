@@ -6,26 +6,29 @@ class HuaweiFusionSolar extends IPSModule
     {
         parent::Create();
 
+        // === Eigene Profile anlegen ===
+        $this->RegisterProfiles();
+
         // === Properties ===
         $this->RegisterPropertyString("Username", "");
         $this->RegisterPropertyString("Password", "");
         $this->RegisterPropertyInteger("UpdateInterval", 300);
 
-        // === Timer (KORREKT) ===
+        // === Timer (korrekt für PHP & Symcon) ===
         $this->RegisterTimer(
             "UpdateTimer",
             0,
             "HFS_Update(" . $this->InstanceID . ");"
         );
 
-        // === Variables ===
+        // === Basis-Variablen ===
         $this->RegisterVariableFloat("TotalPV", "PV Gesamtleistung", "~Watt");
         $this->RegisterVariableFloat("HouseConsumption", "Hausverbrauch", "~Watt");
 
         $this->RegisterVariableFloat("GridImport", "Netzbezug", "~Watt");
         $this->RegisterVariableFloat("GridExport", "Netzeinspeisung", "~Watt");
 
-        $this->RegisterVariableFloat("BatterySOC", "Batterie Ladestand", "~Percent");
+        $this->RegisterVariableFloat("BatterySOC", "Batterie Ladestand", "HFS.Percent");
         $this->RegisterVariableFloat("BatteryPower", "Batterie Leistung", "~Watt");
     }
 
@@ -37,7 +40,8 @@ class HuaweiFusionSolar extends IPSModule
         $this->SetTimerInterval("UpdateTimer", $interval);
     }
 
-    // === Public Update ===
+    // ================= PUBLIC =================
+
     public function Update()
     {
         try {
@@ -97,7 +101,7 @@ class HuaweiFusionSolar extends IPSModule
             $this->SetValue("GridImport", max($gridPower, 0));
             $this->SetValue("GridExport", max(-$gridPower, 0));
 
-            // === Hausverbrauch ===
+            // === Hausverbrauch berechnen ===
             $house =
                 $pvTotal
                 + max($gridPower, 0)
@@ -115,7 +119,18 @@ class HuaweiFusionSolar extends IPSModule
         }
     }
 
-    /* ================== API ================== */
+    // ================= PROFILES =================
+
+    private function RegisterProfiles()
+    {
+        if (!IPS_VariableProfileExists("HFS.Percent")) {
+            IPS_CreateVariableProfile("HFS.Percent", VARIABLETYPE_FLOAT);
+            IPS_SetVariableProfileValues("HFS.Percent", 0, 100, 1);
+            IPS_SetVariableProfileText("HFS.Percent", "", " %");
+        }
+    }
+
+    // ================= API =================
 
     private function Login()
     {
@@ -186,7 +201,7 @@ class HuaweiFusionSolar extends IPSModule
 
         $data = json_decode($response, true);
 
-        // Token abgelaufen → neu einloggen
+        // === Token abgelaufen ===
         if (($data['failCode'] ?? 0) === 305) {
             $this->SetBuffer("Token", "");
             $this->Login();
