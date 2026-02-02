@@ -111,11 +111,8 @@ class HuaweiFusionSolar extends IPSModule
 
             $this->SetValue("HouseConsumption", $house);
 
-            $this->SetStatus(102);
-
         } catch (Throwable $e) {
             IPS_LogMessage("FusionSolar", $e->getMessage());
-            $this->SetStatus(201);
         }
     }
 
