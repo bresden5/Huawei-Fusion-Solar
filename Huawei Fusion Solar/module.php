@@ -6,19 +6,19 @@ class HuaweiFusionSolar extends IPSModule
     {
         parent::Create();
 
-        // Properties
+        // === Properties ===
         $this->RegisterPropertyString("Username", "");
         $this->RegisterPropertyString("Password", "");
         $this->RegisterPropertyInteger("UpdateInterval", 300);
 
-        // Timer
+        // === Timer (KORREKT) ===
         $this->RegisterTimer(
             "UpdateTimer",
             0,
-            "HFS_Update($_IPS['TARGET']);"
+            "HFS_Update(" . $this->InstanceID . ");"
         );
 
-        // Variables
+        // === Variables ===
         $this->RegisterVariableFloat("TotalPV", "PV Gesamtleistung", "~Watt");
         $this->RegisterVariableFloat("HouseConsumption", "Hausverbrauch", "~Watt");
 
@@ -37,6 +37,7 @@ class HuaweiFusionSolar extends IPSModule
         $this->SetTimerInterval("UpdateTimer", $interval);
     }
 
+    // === Public Update ===
     public function Update()
     {
         try {
@@ -47,10 +48,10 @@ class HuaweiFusionSolar extends IPSModule
             $stationId = $this->GetStationId();
             $devices   = $this->GetDevices($stationId);
 
-            $pvTotal = 0;
-            $gridPower = 0;
-            $batPower  = 0;
-            $batSOC    = 0;
+            $pvTotal   = 0.0;
+            $gridPower = 0.0;
+            $batPower  = 0.0;
+            $batSOC    = 0.0;
 
             foreach ($devices as $dev) {
 
@@ -59,13 +60,13 @@ class HuaweiFusionSolar extends IPSModule
 
                 switch ($dev['devTypeId']) {
 
-                    // Wechselrichter
+                    // === Wechselrichter ===
                     case 1:
-                        $power = $map['active_power'] ?? 0;
+                        $power = (float)($map['active_power'] ?? 0);
                         $pvTotal += $power;
 
                         $ident = "INV_" . $dev['id'];
-                        if (!$this->GetIDForIdent($ident)) {
+                        if (@$this->GetIDForIdent($ident) === false) {
                             $this->RegisterVariableFloat(
                                 $ident,
                                 "WR " . $dev['devName'],
@@ -75,20 +76,20 @@ class HuaweiFusionSolar extends IPSModule
                         $this->SetValue($ident, $power);
                         break;
 
-                    // Batterie
+                    // === Batterie ===
                     case 39:
-                        $batSOC   = $map['soc'] ?? 0;
-                        $batPower = $map['charge_discharge_power'] ?? 0;
+                        $batSOC   = (float)($map['soc'] ?? 0);
+                        $batPower = (float)($map['charge_discharge_power'] ?? 0);
                         break;
 
-                    // Netz-Zähler
+                    // === Netz ===
                     case 47:
-                        $gridPower = $map['active_power'] ?? 0;
+                        $gridPower = (float)($map['active_power'] ?? 0);
                         break;
                 }
             }
 
-            // Werte setzen
+            // === Werte setzen ===
             $this->SetValue("TotalPV", $pvTotal);
             $this->SetValue("BatterySOC", $batSOC);
             $this->SetValue("BatteryPower", $batPower);
@@ -96,7 +97,7 @@ class HuaweiFusionSolar extends IPSModule
             $this->SetValue("GridImport", max($gridPower, 0));
             $this->SetValue("GridExport", max(-$gridPower, 0));
 
-            // Hausverbrauch berechnen
+            // === Hausverbrauch ===
             $house =
                 $pvTotal
                 + max($gridPower, 0)
@@ -114,13 +115,13 @@ class HuaweiFusionSolar extends IPSModule
         }
     }
 
-    /* -------------------- API -------------------- */
+    /* ================== API ================== */
 
     private function Login()
     {
         $response = $this->ApiRequest("/thirdData/login", [
-            "userName"    => $this->ReadPropertyString("Username"),
-            "systemCode"  => $this->ReadPropertyString("Password")
+            "userName"   => $this->ReadPropertyString("Username"),
+            "systemCode" => $this->ReadPropertyString("Password")
         ]);
 
         if (!isset($response['data'])) {
@@ -166,7 +167,7 @@ class HuaweiFusionSolar extends IPSModule
 
     private function ApiRequest(string $endpoint, array $payload = []): array
     {
-        $url = "https://eu5.fusionsolar.huawei.com" . $endpoint;
+        $url   = "https://eu5.fusionsolar.huawei.com" . $endpoint;
         $token = $this->GetBuffer("Token");
 
         $ch = curl_init($url);
@@ -185,6 +186,7 @@ class HuaweiFusionSolar extends IPSModule
 
         $data = json_decode($response, true);
 
+        // Token abgelaufen → neu einloggen
         if (($data['failCode'] ?? 0) === 305) {
             $this->SetBuffer("Token", "");
             $this->Login();
