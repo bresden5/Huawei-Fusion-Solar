@@ -2,13 +2,23 @@
   "elements": [
     {
       "type": "ValidationTextBox",
+      "name": "BaseUrl",
+      "caption": "FusionSolar API-Domain"
+    },
+    {
+      "type": "ValidationTextBox",
       "name": "Username",
-      "caption": "FusionSolar Benutzername"
+      "caption": "API-Kontoname"
     },
     {
       "type": "PasswordTextBox",
       "name": "Password",
-      "caption": "FusionSolar Passwort"
+      "caption": "API-SystemCode"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "StationCode",
+      "caption": "Plant-Code (optional)"
     },
     {
       "type": "NumberSpinner",

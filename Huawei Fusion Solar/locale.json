@@ -1,8 +1,12 @@
 {
     "translations": {
         "de": {
-            "Translation 1": "Übersetzung 1",
-            "Translation 2": "Übersetzung 2"
+            "FusionSolar API domain": "FusionSolar API-Domain",
+            "API account name": "API-Kontoname",
+            "API system code": "API-SystemCode",
+            "Plant code (optional)": "Plant-Code (optional)",
+            "Update interval (seconds)": "Update-Intervall (Sekunden)",
+            "Update now": "Jetzt aktualisieren"
         }
     }
 }
