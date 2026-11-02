@@ -1,7 +1,10 @@
 <?php
 
+require_once __DIR__ . "/../libs/WebSession.php";
+
 class HuaweiFusionSolar extends IPSModule
 {
+    use FusionSolarWebSession;
     public function Create()
     {
         parent::Create();
@@ -10,6 +13,13 @@ class HuaweiFusionSolar extends IPSModule
         $this->RegisterProfiles();
 
         // === Properties ===
+        $this->RegisterPropertyString('AccessMode', 'api');
+        $this->RegisterPropertyString('WebOrigin', 'https://uni004eu5.fusionsolar.huawei.com');
+        $this->RegisterPropertyString('WebStation', '');
+        $this->RegisterAttributeString('WebSession', '');
+        $this->RegisterVariableBoolean('WebDataValid', 'Website-Werte gültig');
+        $this->RegisterVariableInteger('LastWebSuccess', 'Letzter Website-Abruf', '~UnixTimestamp');
+        $this->RegisterVariableString('ConnectionStatus', 'Verbindungsstatus');
         $this->RegisterPropertyString("BaseUrl", "https://eu5.fusionsolar.huawei.com");
         $this->RegisterPropertyString("Username", "");
         $this->RegisterPropertyString("Password", "");
@@ -42,6 +52,11 @@ class HuaweiFusionSolar extends IPSModule
     {
         parent::ApplyChanges();
 
+        if ($this->ReadPropertyString('AccessMode') === 'web') {
+            $this->ConfigureWeb();
+            return;
+        }
+        $this->SetValue('WebDataValid', false);
         $interval = $this->ReadPropertyInteger("UpdateInterval") * 1000;
         if ($this->ReadPropertyString("Username") === "" || $this->ReadPropertyString("Password") === "") {
             $this->SetTimerInterval("UpdateTimer", 0);
@@ -55,6 +70,14 @@ class HuaweiFusionSolar extends IPSModule
 
     public function RequestAction($Ident, $Value)
     {
+        if ($Ident === 'ImportWebSession') {
+            $this->ImportWebSession($Value);
+            return;
+        }
+        if ($Ident === 'ForgetWebSession') {
+            $this->ForgetWebSession();
+            return;
+        }
         if ($Ident === 'Update') {
             $this->Update();
             return;
@@ -67,6 +90,10 @@ class HuaweiFusionSolar extends IPSModule
 
     public function Update()
     {
+        if ($this->ReadPropertyString('AccessMode') === 'web') {
+            $this->UpdateWeb();
+            return;
+        }
         try {
             if ($this->ReadAttributeString("Token") === "") {
                 $this->Login();

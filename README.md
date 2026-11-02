@@ -1,6 +1,8 @@
 # Huawei Fusion Solar
 
-Folgende Module beinhaltet das Huawei Fusion Solar Repository:
+IP-Symcon-Modul für Huawei FusionSolar ab Symcon 7.1.
 
-- __Huawei Fusion Solar__ ([Dokumentation](Huawei%20Fusion%20Solar))  
-	Kurze Beschreibung des Moduls.
+- Northbound API mit eigenem API-Konto.
+- Experimenteller Website-Modus mit manuell importierter Sitzung, Keep-alive und fünfminütiger Messwertabfrage.
+
+[Einrichtung, Statusvariablen und Grenzen](Huawei%20Fusion%20Solar/README.md)

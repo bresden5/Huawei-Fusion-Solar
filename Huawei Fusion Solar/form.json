@@ -1,6 +1,35 @@
 {
   "elements": [
     {
+      "type": "Select",
+      "name": "AccessMode",
+      "caption": "Zugriffsart",
+      "options": [
+        {
+          "caption": "Northbound API",
+          "value": "api"
+        },
+        {
+          "caption": "Website (Übergangslösung)",
+          "value": "web"
+        }
+      ]
+    },
+    {
+      "type": "Label",
+      "caption": "Website: Domain und Anlagenkennung eintragen, übernehmen und unten Sitzung importieren. API-Felder werden im Website-Modus nicht verwendet."
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "WebOrigin",
+      "caption": "Website-Domain (HTTPS, ohne Pfad)"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "WebStation",
+      "caption": "Website-Anlagenkennung (z. B. NE=151380676)"
+    },
+    {
       "type": "ValidationTextBox",
       "name": "BaseUrl",
       "caption": "FusionSolar API-Domain"
@@ -23,8 +52,8 @@
     {
       "type": "NumberSpinner",
       "name": "UpdateInterval",
-      "caption": "Update-Intervall (Sekunden)",
-      "minimum": 60,
+      "caption": "Update-Intervall (Sekunden; Website mindestens 300)",
+      "minimum": 300,
       "maximum": 900
     }
   ],
@@ -33,6 +62,49 @@
       "type": "Button",
       "caption": "Jetzt aktualisieren",
       "onClick": "IPS_RequestAction($id, 'Update', 0);"
+    },
+    {
+      "type": "Label",
+      "caption": "Sitzung nur lokal eingeben. Speicherung in Symcon-Attributen, nicht verschlüsselt; auch Backups schützen. Keine automatische Neuanmeldung."
+    },
+    {
+      "type": "PasswordTextBox",
+      "name": "CookieInput",
+      "caption": "Aktueller Cookie-Headerwert",
+      "value": ""
+    },
+    {
+      "type": "PasswordTextBox",
+      "name": "TokenInput",
+      "caption": "Aktueller roarand-Wert",
+      "value": ""
+    },
+    {
+      "type": "Button",
+      "caption": "Website-Sitzung importieren und starten",
+      "onClick": "IPS_RequestAction($id, 'ImportWebSession', json_encode(['cookie' => $CookieInput, 'token' => $TokenInput]));"
+    },
+    {
+      "type": "Button",
+      "caption": "Website-Sitzung entfernen / Abruf stoppen",
+      "onClick": "IPS_RequestAction($id, 'ForgetWebSession', 0);"
+    }
+  ],
+  "status": [
+    {
+      "code": 102,
+      "icon": "active",
+      "caption": "Bereit / verbunden"
+    },
+    {
+      "code": 201,
+      "icon": "error",
+      "caption": "Website-Sitzung fehlt oder ist abgelaufen"
+    },
+    {
+      "code": 202,
+      "icon": "error",
+      "caption": "Website-Abruf gestoppt; Konfiguration oder Daten prüfen"
     }
   ]
 }
