@@ -16,6 +16,9 @@ class HuaweiFusionSolar extends IPSModule
         $this->RegisterPropertyString('AccessMode', 'api');
         $this->RegisterPropertyString('WebOrigin', 'https://uni004eu5.fusionsolar.huawei.com');
         $this->RegisterPropertyString('WebStation', '');
+        $this->RegisterPropertyBoolean('WebInverterDetails', false);
+        $this->RegisterAttributeString('WebInverterIDs', '[]');
+        $this->RegisterVariableBoolean('WebInvertersValid', 'Wechselrichterdetails gültig');
         $this->RegisterAttributeString('WebSession', '');
         $this->RegisterVariableBoolean('WebDataValid', 'Website-Werte gültig');
         $this->RegisterVariableInteger('LastWebSuccess', 'Letzter Website-Abruf', '~UnixTimestamp');
@@ -51,6 +54,7 @@ class HuaweiFusionSolar extends IPSModule
     public function ApplyChanges()
     {
         parent::ApplyChanges();
+        $this->InvalidateWebInverters();
 
         if ($this->ReadPropertyString('AccessMode') === 'web') {
             $this->ConfigureWeb();

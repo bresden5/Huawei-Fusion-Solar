@@ -30,6 +30,11 @@
       "caption": "Website-Anlagenkennung (z. B. NE=151380676)"
     },
     {
+      "type": "CheckBox",
+      "name": "WebInverterDetails",
+      "caption": "Website: Wechselrichterdetails abrufen (eine zusätzliche Anfrage je Gerät)"
+    },
+    {
       "type": "ValidationTextBox",
       "name": "BaseUrl",
       "caption": "FusionSolar API-Domain"

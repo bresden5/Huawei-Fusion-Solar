@@ -32,7 +32,7 @@ Domain oder Anlagenkennung ändern verwirft die bisherige Sitzung. Erneuerte Coo
 | `LastWebSuccess` | Zeitpunkt des letzten erfolgreichen Abrufs, **kein Messzeitpunkt** |
 | `ConnectionStatus` | Verbindung, fehlende Sitzung oder Fehlerursache |
 
-Batterievariablen und gegebenenfalls vorhandene Einzelwechselrichtervariablen stammen aus dem API-Modus und werden im Website-Modus **nicht aktualisiert**. Sie sind dort nicht zu verwenden. `WebDataValid` gilt ausschließlich für die vier oben genannten Leistungswerte. Für Automatisierungen zusätzlich das Alter von `LastWebSuccess` prüfen (z. B. höchstens zweimal das Abfrageintervall).
+Batterievariablen und ältere `INV_…`-Einzelwechselrichtervariablen stammen aus dem API-Modus und werden im Website-Modus **nicht aktualisiert**. Die neuen Website-Details verwenden eigene `WEBINV_…`-Variablen. `WebDataValid` gilt ausschließlich für die vier oben genannten Leistungswerte. Für Automatisierungen zusätzlich das Alter von `LastWebSuccess` prüfen (z. B. höchstens zweimal das Abfrageintervall).
 
 Bei fehlenden Werten, unbekannten Einheiten oder unklarer Flussrichtung bleiben die letzten Messwerte erhalten; `WebDataValid` wird false und der Timer stoppt. Es werden keine fehlenden Werte als Null ergänzt. Eine explizite Nullleistung bleibt zulässig. Andere Netzfluss-Layouts als das getestete müssen gegebenenfalls anhand einer anonymisierten Antwort ergänzt werden. Einspeisung wurde mit simulierten Antworten getestet, nicht an der Live-Anlage.
 
@@ -47,3 +47,22 @@ Es gibt keine automatische Passwortanmeldung, CAPTCHA-Behandlung oder Anlagenste
 ## Prüfung
 
 `php -n tests/web_session.php` führt isolierte Tests ohne Netzwerk durch: Moduskompatibilität, Sitzungsimport, Token-/Cookie-Übernahme, Bezug/Einspeisung, fehlende Daten, Fehlerstopp, erneuter Versuch, Anlagenwechsel und lokale Sitzungslöschung. Die Konfiguration muss nach Installation zusätzlich in einer echten Symcon-Konsole geprüft werden.
+
+## Wechselrichterdetails (ab Version 1.2)
+
+In der Instanz **Website: Wechselrichterdetails abrufen** einschalten, übernehmen und **Jetzt aktualisieren** anklicken. Eine noch gültige Sitzung muss nicht erneut importiert werden. Die Option ist standardmäßig aus, damit ein Update keine zusätzlichen Anfragen startet.
+
+Die Gerätekennungen werden aus dem Wechselrichterknoten im Energiefluss übernommen. Für die getestete Anlage sind dies `NE=151380680` und `NE=188552817`. Pro Zyklus entsteht eine weitere Anfrage je Wechselrichter; bei zwei Geräten insgesamt vier Anfragen (Keep-alive, Energiefluss, zwei Detailabfragen). Maximal acht Geräte werden unterstützt. Für diesen inoffiziellen Endpunkt ist kein verbindliches Huawei-Abfragelimit bekannt.
+
+Variablen heißen `WEBINV_<Gerätenummer>_<Signal>` und werden mit „WR <Gerätenummer> – …“ beschriftet. Geliefert werden, soweit vorhanden:
+
+- AC-Wirkleistung und Nennleistung in W; Blindleistung in kvar.
+- Tages- und Gesamtertrag in kWh, Leistungsfaktor und Frequenz.
+- Spannung und Strom jeder Phase, Innentemperatur und Isolationswiderstand.
+- Status, Ausgabemodus, Anschalt-/Abschaltzeit sowie Leistungsanpassung und Schaltstatus.
+
+Zu jedem Signal gehört eine `_Time`-Variable mit `latestTime` von Huawei (Unix-Sekunden). Diese Zeiten können unterschiedlich alt sein, besonders bei Nennleistung oder Konfiguration. Anschalt-/Abschaltzeit werden als Website-Text gespeichert, ohne eine Zeitzone zu erraten. Ein erfolgreicher Abruf garantiert keine frischen Cloud-Messwerte.
+
+`WEBINV_<ID>_Valid` und `WebInvertersValid` zeigen an, ob alle 22 unterstützten Signale im aktuellen Abruf auswertbar waren, **nicht** ob sie aktuell sind. `_LastSuccess` ist die lokale Abrufzeit. `_Missing` listet fehlende oder unverständliche Signale. In diesem Fall bleibt der alte Einzelwert stehen, dessen `_Time` wird 0; andere gültige Einzelwerte werden aktualisiert. Modelle, die nicht alle Signale liefern, können dauerhaft „Details vollständig = false“ melden. Für Einzelwert-Automatisierungen `_Time`, `_LastSuccess` und den Verbindungsstatus prüfen.
+
+Bei Fehlern einer Detailanfrage stoppt der gesamte Zyklus; die Gültigkeitsanzeigen werden false. Bei Deaktivierung oder entferntem Gerät bleiben alte Variablen erhalten, sind aber nicht mehr gültig. Es werden keine Batterie- oder PV-String-Werte erfunden. Die Antwort des ersten Wechselrichters wurde vom Anwender geliefert, die Anfrage für den zweiten mit simulierten Daten geprüft; der Live-Test beider Geräte in Symcon steht noch aus.

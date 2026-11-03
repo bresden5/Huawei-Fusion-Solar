@@ -18,6 +18,9 @@ trait FusionSolarWebSession
     private function WebStatus(string $message, int $status, bool $valid = false): void
     {
         $this->SetValue('WebDataValid', $valid);
+        if (!$valid) {
+            $this->InvalidateWebInverters();
+        }
         $this->SetValue('ConnectionStatus', $message);
         $this->SetStatus($status);
     }
@@ -169,6 +172,11 @@ trait FusionSolarWebSession
                 throw new RuntimeException('Energiefluss-Abfrage nicht bestätigt. Sitzung und Berechtigungen prüfen.');
             }
             $values = $this->ParseWebFlow($data['data']['flow'] ?? []);
+            $detailMessage = 'Wechselrichterdetails deaktiviert.';
+            $this->InvalidateWebInverters();
+            if ($this->ReadPropertyBoolean('WebInverterDetails')) {
+                $detailMessage = $this->UpdateWebInverters($ch, $origin, $session['token'], $data['data']['flow']);
+            }
             foreach ($values as $ident => $value) {
                 $this->SetValue($ident, $value);
             }
@@ -176,7 +184,7 @@ trait FusionSolarWebSession
             $session['paused'] = false;
             $this->WriteAttributeString('WebSession', json_encode($session, JSON_THROW_ON_ERROR));
             $this->SetValue('LastWebSuccess', time());
-            $this->WebStatus('Website verbunden. Abrufzeit ist kein Messzeitpunkt. Batterie und Einzelwechselrichter nicht verfügbar.', 102, true);
+            $this->WebStatus('Website verbunden. Batterie nicht verfügbar. ' . $detailMessage, 102, true);
             $this->SetTimerInterval('UpdateTimer', max(300, $this->ReadPropertyInteger('UpdateInterval')) * 1000);
         } catch (Throwable $e) {
             if ($e->getCode() === 201) {
@@ -248,5 +256,177 @@ trait FusionSolarWebSession
             throw new RuntimeException('PV, Hausverbrauch oder Netzfluss fehlt. Letzte Werte bleiben erhalten.');
         }
         return $values;
+    }
+    private function InverterSignals(): array
+    {
+        // IDs and units observed in device-realtime-data, not Northbound devTypeIds.
+        return [
+            10025 => ['Status', 'Status', '', 'text'],
+            10032 => ['DailyYield', 'Tagesertrag', 'kWh', 'number'],
+            10029 => ['TotalYield', 'Gesamtertrag', 'kWh', 'number'],
+            10018 => ['ActivePower', 'Wirkleistung AC', 'kW', 'number'],
+            10019 => ['ReactivePower', 'Blindleistung', 'kvar', 'number'],
+            10006 => ['RatedPower', 'Nennleistung', 'kW', 'number'],
+            10020 => ['PowerFactor', 'Leistungsfaktor', '', 'number'],
+            10021 => ['Frequency', 'Frequenz', 'Hz', 'number'],
+            21029 => ['OutputMode', 'Ausgabemodus', '', 'text'],
+            10014 => ['CurrentL1', 'Strom L1', 'A', 'number'],
+            10015 => ['CurrentL2', 'Strom L2', 'A', 'number'],
+            10016 => ['CurrentL3', 'Strom L3', 'A', 'number'],
+            10011 => ['VoltageL1', 'Spannung L1', 'V', 'number'],
+            10012 => ['VoltageL2', 'Spannung L2', 'V', 'number'],
+            10013 => ['VoltageL3', 'Spannung L3', 'V', 'number'],
+            10027 => ['Startup', 'Anschaltzeit (Website)', '', 'text'],
+            10028 => ['Shutdown', 'Abschaltzeit (Website)', '', 'text'],
+            10023 => ['Temperature', 'Innentemperatur', '℃', 'number'],
+            10024 => ['Insulation', 'Isolationswiderstand', 'MΩ', 'number'],
+            230223000 => ['ActiveAdjustment', 'Wirkleistungsanpassung', '', 'text'],
+            230223001 => ['ReactiveAdjustment', 'Blindleistungsanpassung', '', 'text'],
+            230223007 => ['SwitchStatus', 'Schaltstatus', '', 'text']
+        ];
+    }
+
+    private function InvalidateWebInverters(): void
+    {
+        $this->SetValue('WebInvertersValid', false);
+        foreach (json_decode($this->ReadAttributeString('WebInverterIDs'), true) ?? [] as $device) {
+            $this->RegisterVariableBoolean('WEBINV_' . $device . '_Valid', 'WR ' . $device . ' – Details vollständig');
+            $this->SetValue('WEBINV_' . $device . '_Valid', false);
+        }
+    }
+
+    private function ParseInverterSignals(array $response): array
+    {
+        if (($response['success'] ?? null) !== true || ($response['failCode'] ?? null) !== 0 || !is_array($response['data'] ?? null)) {
+            throw new RuntimeException('Wechselrichter-Abfrage nicht bestätigt.');
+        }
+        $map = $this->InverterSignals();
+        $parsed = [];
+        $seen = [];
+        foreach ($response['data'] as $group) {
+            if (!is_array($group) || !isset($group['signals'])) {
+                continue;
+            }
+            if (!is_array($group['signals'])) {
+                throw new RuntimeException('Wechselrichter-Signalformat unbekannt.');
+            }
+            foreach ($group['signals'] as $signal) {
+                $id = $signal['id'] ?? null;
+                if (!is_int($id) && !(is_string($id) && preg_match('/^\d+$/D', $id))) {
+                    continue;
+                }
+                $id = (int) $id;
+                if (!isset($map[$id])) {
+                    continue;
+                }
+                if (isset($seen[$id])) {
+                    throw new RuntimeException('Wechselrichter-Signal doppelt vorhanden.');
+                }
+                $seen[$id] = true;
+                $unit = $signal['unit'] ?? null;
+                $expectedUnit = $map[$id][2];
+                if ($expectedUnit === '℃' && $unit === '°C') {
+                    $unit = '℃';
+                }
+                $stamp = $signal['latestTime'] ?? null;
+                if ($unit !== $expectedUnit || !is_numeric($stamp) || (float) $stamp <= 0 || (float) $stamp != (int) $stamp) {
+                    continue;
+                }
+                if ($map[$id][3] === 'number') {
+                    $raw = $signal['realValue'] ?? null;
+                    if ((!is_string($raw) && !is_int($raw) && !is_float($raw)) || !is_numeric($raw) || !is_finite((float) $raw)) {
+                        continue;
+                    }
+                    $value = (float) $raw;
+                    if ($unit === 'kW') {
+                        $value *= 1000;
+                    }
+                } else {
+                    $value = $signal['value'] ?? null;
+                    if (!is_string($value) || trim($value) === '' || strlen($value) > 512) {
+                        continue;
+                    }
+                }
+                $parsed[$id] = ['value' => $value, 'time' => (int) $stamp];
+            }
+        }
+        if ($parsed === []) {
+            throw new RuntimeException('Keine unterstützten Wechselrichter-Messwerte geliefert.');
+        }
+        return $parsed;
+    }
+
+    private function UpdateWebInverters($ch, string $origin, string $token, array $flow): string
+    {
+        $devices = [];
+        foreach ($flow['nodes'] as $node) {
+            if (($node['name'] ?? '') !== 'neteco.pvms.devTypeLangKey.inverter') {
+                continue;
+            }
+            foreach (($node['devIds'] ?? []) as $dn) {
+                if (!is_string($dn) || !preg_match('/^NE=(\d+)$/D', $dn, $match)) {
+                    throw new RuntimeException('Ungültige Wechselrichterkennung im Energiefluss.');
+                }
+                $devices[$match[1]] = $dn;
+            }
+        }
+        if ($devices === []) {
+            return 'Keine Wechselrichterkennungen im Energiefluss gefunden.';
+        }
+        // Bounded requests for this residential integration; never silently omit devices.
+        if (count($devices) > 8) {
+            throw new RuntimeException('Mehr als acht Wechselrichter: Detailabruf bitte deaktivieren.');
+        }
+        $results = [];
+        foreach ($devices as $device => $dn) {
+            $query = http_build_query(['deviceDn' => $dn, 'displayAccessModel' => 'true',
+                '_' => sprintf('%.0f', microtime(true) * 1000)], '', '&', PHP_QUERY_RFC3986);
+            $response = $this->WebGet($ch, $origin . '/rest/pvms/web/device/v1/device-realtime-data?' . $query, $token, true);
+            $results[$device] = $this->ParseInverterSignals($response);
+        }
+        $known = json_decode($this->ReadAttributeString('WebInverterIDs'), true) ?? [];
+        $known = array_values(array_unique(array_merge($known, array_map('strval', array_keys($devices)))));
+        $this->WriteAttributeString('WebInverterIDs', json_encode($known));
+        $complete = true;
+        foreach ($results as $device => $signals) {
+            $prefix = 'WEBINV_' . $device . '_';
+            $name = 'WR ' . $device . ' – ';
+            $missing = [];
+            foreach ($this->InverterSignals() as $id => [$suffix, $caption, $unit, $type]) {
+                $ident = $prefix . $suffix;
+                if ($type === 'text') {
+                    $this->RegisterVariableString($ident, $name . $caption);
+                } else {
+                    $profile = '';
+                    if ($unit !== '') {
+                        $displayUnit = $unit === 'kW' ? 'W' : ($unit === '℃' ? '°C' : $unit);
+                        $profile = 'HFS.Web.' . $suffix;
+                        if (!IPS_VariableProfileExists($profile)) {
+                            IPS_CreateVariableProfile($profile, VARIABLETYPE_FLOAT);
+                            IPS_SetVariableProfileDigits($profile, $displayUnit === 'W' ? 0 : 3);
+                            IPS_SetVariableProfileText($profile, '', ' ' . $displayUnit);
+                        }
+                    }
+                    $this->RegisterVariableFloat($ident, $name . $caption, $profile);
+                }
+                $this->RegisterVariableInteger($ident . '_Time', $name . $caption . ' Messzeit', '~UnixTimestamp');
+                if (isset($signals[$id])) {
+                    $this->SetValue($ident, $signals[$id]['value']);
+                    $this->SetValue($ident . '_Time', $signals[$id]['time']);
+                } else {
+                    $missing[] = $caption;
+                    $this->SetValue($ident . '_Time', 0);
+                }
+            }
+            $this->RegisterVariableBoolean($prefix . 'Valid', $name . 'Details vollständig');
+            $this->RegisterVariableString($prefix . 'Missing', $name . 'Fehlende Details');
+            $this->RegisterVariableInteger($prefix . 'LastSuccess', $name . 'Letzter Detailabruf', '~UnixTimestamp');
+            $this->SetValue($prefix . 'Valid', $missing === []);
+            $this->SetValue($prefix . 'Missing', implode(', ', $missing));
+            $this->SetValue($prefix . 'LastSuccess', time());
+            $complete = $complete && $missing === [];
+        }
+        $this->SetValue('WebInvertersValid', $complete);
+        return count($results) . ' Wechselrichter abgerufen.' . ($complete ? '' : ' Einige Details fehlen; Messzeiten und Fehlende Details prüfen.');
     }
 }
