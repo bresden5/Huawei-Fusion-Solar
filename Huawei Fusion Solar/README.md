@@ -54,7 +54,7 @@ In der Instanz **Website: Wechselrichterdetails abrufen** einschalten, übernehm
 
 Die Gerätekennungen werden aus dem Wechselrichterknoten im Energiefluss übernommen. Für die getestete Anlage sind dies `NE=151380680` und `NE=188552817`. Pro Zyklus entsteht eine weitere Anfrage je Wechselrichter; bei zwei Geräten insgesamt vier Anfragen (Keep-alive, Energiefluss, zwei Detailabfragen). Maximal acht Geräte werden unterstützt. Für diesen inoffiziellen Endpunkt ist kein verbindliches Huawei-Abfragelimit bekannt.
 
-Variablen heißen `WEBINV_<Gerätenummer>_<Signal>` und werden mit „WR <Gerätenummer> – …“ beschriftet. Geliefert werden, soweit vorhanden:
+Variablen heißen `WEBINV_<Gerätenummer>_<Signal>` und liegen ab Version 1.3 im Ordner „Wechselrichter <Gerätenummer>“ mit kurzen Beschriftungen. Geliefert werden, soweit vorhanden:
 
 - AC-Wirkleistung und Nennleistung in W; Blindleistung in kvar.
 - Tages- und Gesamtertrag in kWh, Leistungsfaktor und Frequenz.
@@ -66,3 +66,11 @@ Zu jedem Signal gehört eine `_Time`-Variable mit `latestTime` von Huawei (Unix-
 `WEBINV_<ID>_Valid` und `WebInvertersValid` zeigen an, ob alle 22 unterstützten Signale im aktuellen Abruf auswertbar waren, **nicht** ob sie aktuell sind. `_LastSuccess` ist die lokale Abrufzeit. `_Missing` listet fehlende oder unverständliche Signale. In diesem Fall bleibt der alte Einzelwert stehen, dessen `_Time` wird 0; andere gültige Einzelwerte werden aktualisiert. Modelle, die nicht alle Signale liefern, können dauerhaft „Details vollständig = false“ melden. Für Einzelwert-Automatisierungen `_Time`, `_LastSuccess` und den Verbindungsstatus prüfen.
 
 Bei Fehlern einer Detailanfrage stoppt der gesamte Zyklus; die Gültigkeitsanzeigen werden false. Bei Deaktivierung oder entferntem Gerät bleiben alte Variablen erhalten, sind aber nicht mehr gültig. Es werden keine Batterie- oder PV-String-Werte erfunden. Die Antwort des ersten Wechselrichters wurde vom Anwender geliefert, die Anfrage für den zweiten mit simulierten Daten geprüft; der Live-Test beider Geräte in Symcon steht noch aus.
+
+## Ordner pro Wechselrichter (ab Version 1.3)
+
+Nach dem Bibliotheksupdate werden beim Anwenden der Instanzkonfiguration die bisherigen `WEBINV_…`-Variablen in eine Kategorie pro Wechselrichter verschoben. Für die getestete Anlage heißen diese „Wechselrichter 151380680“ und „Wechselrichter 188552817“. Messwerte, individuelle Messzeiten und Gerätestatus liegen jeweils zusammen. Die Anlagen-Gesamtwerte bleiben direkt unter der Instanz.
+
+Vorhandene Objekt-IDs, Profile, Verknüpfungen und Archivzuordnungen bleiben erhalten. Die Variablen werden verschoben, nicht gelöscht oder neu erstellt. Eigene Variablennamen bleiben erhalten; lediglich der bisher automatisch erzeugte Vorsatz „WR <Nummer> – “ wird entfernt. Neue Geräte erhalten ihren Ordner beim ersten Detailabruf. Auch bei deaktiviertem Detailabruf werden vorhandene Variablen beim Übernehmen einsortiert.
+
+Skripte mit festen Variablen-IDs funktionieren weiter. Eigene Skripte, die bisher `IPS_GetObjectIDByIdent('WEBINV_<ID>_<Signal>', InstanzID)` verwendet haben, müssen zuerst den Ordner `WEBINV_<ID>` unter der Instanz suchen und dann darin die Variable. Die Ident-Kennungen selbst bleiben unverändert. Benutzerobjekte und Anlagenvariablen werden nicht verschoben.

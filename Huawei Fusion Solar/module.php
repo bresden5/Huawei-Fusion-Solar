@@ -54,6 +54,7 @@ class HuaweiFusionSolar extends IPSModule
     public function ApplyChanges()
     {
         parent::ApplyChanges();
+        $this->MigrateInverterFolders();
         $this->InvalidateWebInverters();
 
         if ($this->ReadPropertyString('AccessMode') === 'web') {

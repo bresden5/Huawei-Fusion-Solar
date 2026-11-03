@@ -24,6 +24,20 @@ class IPSModule {
         throw new Exception('Unexpected mock call: ' . $name);
     }
 }
+$objects = [];
+function IPS_CreateCategory() {return createObject(0);}
+function IPS_CreateVariable($type) {$id=createObject(2);$GLOBALS['objects'][$id]['VariableType']=$type;return $id;}
+function createObject($type) {static $id=100; $id++;$GLOBALS['objects'][$id]=['ObjectType'=>$type,'ObjectIdent'=>'','ParentID'=>0,'Name'=>''];return $id;}
+function IPS_GetObjectIDByIdent($ident,$parent) {foreach($GLOBALS['objects'] as $id=>$o)if($o['ObjectIdent']===$ident && $o['ParentID']===$parent)return $id;return false;}
+function IPS_GetObject($id) {return $GLOBALS['objects'][$id];}
+function IPS_GetVariable($id) {return $GLOBALS['objects'][$id];}
+function IPS_GetName($id) {return $GLOBALS['objects'][$id]['Name'];}
+function IPS_SetParent($id,$parent) {$GLOBALS['objects'][$id]['ParentID']=$parent;}
+function IPS_SetIdent($id,$ident) {$GLOBALS['objects'][$id]['ObjectIdent']=$ident;}
+function IPS_SetName($id,$name) {$GLOBALS['objects'][$id]['Name']=$name;}
+function IPS_SetVariableCustomProfile($id,$profile) {$GLOBALS['objects'][$id]['Profile']=$profile;}
+function IPS_GetChildrenIDs($parent) {return array_keys(array_filter($GLOBALS['objects'],static function($o)use($parent){return $o['ParentID']===$parent;}));}
+function SetValue($id,$value) {$GLOBALS['objects'][$id]['Value']=$value;$GLOBALS['m']->values[$GLOBALS['objects'][$id]['ObjectIdent']]=$value;}
 function IPS_VariableProfileExists($name) {return true;}
 function IPS_SemaphoreEnter($name, $timeout) {return true;}
 function IPS_SemaphoreLeave($name) {}
@@ -131,3 +145,18 @@ check(!$m->values['WebInvertersValid'] && !$m->values['WEBINV_151380680_Valid'] 
 $deviceResponses['NE=188552817']=$response;$m->Update();
 $deviceCalls=[];$m->properties['WebInverterDetails']=false;$m->ApplyChanges();$m->Update();
 check($deviceCalls===[] && !$m->values['WebInvertersValid'] && !$m->values['WEBINV_188552817_Valid'] && $m->values['WebDataValid'],'disabling details stops requests and invalidates old device values');
+$folder1=IPS_GetObjectIDByIdent('WEBINV_151380680',7);
+$folder2=IPS_GetObjectIDByIdent('WEBINV_188552817',7);
+$powerID=IPS_GetObjectIDByIdent('WEBINV_151380680_ActivePower',$folder1);
+check($folder1!==false && $folder2!==false && $folder1!==$folder2 && $powerID!==false,'separate folders contain device values');
+check(IPS_GetObjectIDByIdent('WEBINV_151380680_ActivePower',7)===false,'no device variable duplicated at instance root');
+// Simulate a pre-1.3 variable, including its existing ID/profile and archive marker.
+IPS_SetParent($powerID,7);IPS_SetName($powerID,'WR 151380680 – Wirkleistung AC');
+$objects[$powerID]['Profile']='User.Custom';$objects[$powerID]['ArchiveMarker']=[11,22];
+$unrelated=IPS_CreateVariable(2);IPS_SetParent($unrelated,7);IPS_SetIdent($unrelated,'UserPower');
+$m->ApplyChanges();
+check(IPS_GetObjectIDByIdent('WEBINV_151380680_ActivePower',$folder1)===$powerID && $objects[$powerID]['Profile']==='User.Custom' && $objects[$powerID]['ArchiveMarker']===[11,22],'migration preserves object ID profile and history');
+check(IPS_GetName($powerID)==='Wirkleistung AC' && $objects[$unrelated]['ParentID']===7,'short captions and unrelated variables untouched');
+$count=count($objects);$m->ApplyChanges();check(count($objects)===$count,'repeated migration creates no duplicates');
+$m->properties['WebInverterDetails']=true;$m->Update();
+check(IPS_GetObjectIDByIdent('WEBINV_151380680_ActivePower',$folder1)===$powerID && $objects[$powerID]['Value']===78.0,'subsequent polls update migrated variables');

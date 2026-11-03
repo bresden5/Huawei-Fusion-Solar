@@ -257,6 +257,81 @@ trait FusionSolarWebSession
         }
         return $values;
     }
+    private function InverterFolder(string $device): int
+    {
+        $ident = 'WEBINV_' . $device;
+        $folder = @IPS_GetObjectIDByIdent($ident, $this->InstanceID);
+        if ($folder === false) {
+            $folder = IPS_CreateCategory();
+            IPS_SetParent($folder, $this->InstanceID);
+            IPS_SetIdent($folder, $ident);
+            IPS_SetName($folder, 'Wechselrichter ' . $device);
+        } elseif (IPS_GetObject($folder)['ObjectType'] !== 0) {
+            throw new RuntimeException('Wechselrichter-Ordnerkennung ist bereits anderweitig belegt.');
+        }
+        return $folder;
+    }
+
+    private function RegisterInverterVariable(int $type, string $ident, string $name, string $profile = ''): void
+    {
+        if (!preg_match('/^WEBINV_(\d+)_/', $ident, $match)) {
+            throw new RuntimeException('Ungültige Wechselrichter-Variablenkennung.');
+        }
+        $folder = $this->InverterFolder($match[1]);
+        $variable = @IPS_GetObjectIDByIdent($ident, $folder);
+        $legacy = @IPS_GetObjectIDByIdent($ident, $this->InstanceID);
+        if ($variable !== false && $legacy !== false) {
+            throw new RuntimeException('Doppelte Wechselrichtervariable vorhanden; keine Daten automatisch überschrieben.');
+        }
+        if ($variable === false && $legacy !== false) {
+            $variable = $legacy;
+        }
+        if ($variable !== false && (IPS_GetObject($variable)['ObjectType'] !== 2 || IPS_GetVariable($variable)['VariableType'] !== $type)) {
+            throw new RuntimeException('Wechselrichtervariable hat einen unerwarteten Typ.');
+        }
+        if ($variable === false) {
+            $variable = IPS_CreateVariable($type);
+            IPS_SetParent($variable, $folder);
+            IPS_SetIdent($variable, $ident);
+            IPS_SetName($variable, preg_replace('/^WR \d+ – /u', '', $name));
+            if ($profile !== '') {
+                IPS_SetVariableCustomProfile($variable, $profile);
+            }
+        } elseif ($legacy !== false) {
+            // Move the existing object: ID, history, links and custom profiles survive.
+            IPS_SetParent($variable, $folder);
+            $oldName = IPS_GetName($variable);
+            IPS_SetName($variable, preg_replace('/^WR \d+ – /u', '', $oldName));
+        }
+    }
+
+    private function SetInverterValue(string $ident, $value): void
+    {
+        preg_match('/^WEBINV_(\d+)_/', $ident, $match);
+        $folder = $this->InverterFolder($match[1]);
+        $variable = IPS_GetObjectIDByIdent($ident, $folder);
+        SetValue($variable, $value);
+    }
+
+    private function MigrateInverterFolders(): void
+    {
+        // Only our known inverter variables; never move station-level/user objects.
+        foreach (IPS_GetChildrenIDs($this->InstanceID) as $child) {
+            $object = IPS_GetObject($child);
+            if ($object['ObjectType'] !== 2 || !preg_match('/^WEBINV_(\d+)_(.+)$/D', $object['ObjectIdent'], $match)) {
+                continue;
+            }
+            $suffixes = ['Valid', 'Missing', 'LastSuccess'];
+            foreach ($this->InverterSignals() as $signal) {
+                $suffixes[] = $signal[0];
+                $suffixes[] = $signal[0] . '_Time';
+            }
+            if (in_array($match[2], $suffixes, true)) {
+                $this->RegisterInverterVariable(IPS_GetVariable($child)['VariableType'], $object['ObjectIdent'], IPS_GetName($child));
+            }
+        }
+    }
+
     private function InverterSignals(): array
     {
         // IDs and units observed in device-realtime-data, not Northbound devTypeIds.
@@ -290,8 +365,8 @@ trait FusionSolarWebSession
     {
         $this->SetValue('WebInvertersValid', false);
         foreach (json_decode($this->ReadAttributeString('WebInverterIDs'), true) ?? [] as $device) {
-            $this->RegisterVariableBoolean('WEBINV_' . $device . '_Valid', 'WR ' . $device . ' – Details vollständig');
-            $this->SetValue('WEBINV_' . $device . '_Valid', false);
+            $this->RegisterInverterVariable(0, 'WEBINV_' . $device . '_Valid', 'WR ' . $device . ' – Details vollständig');
+            $this->SetInverterValue('WEBINV_' . $device . '_Valid', false);
         }
     }
 
@@ -395,7 +470,7 @@ trait FusionSolarWebSession
             foreach ($this->InverterSignals() as $id => [$suffix, $caption, $unit, $type]) {
                 $ident = $prefix . $suffix;
                 if ($type === 'text') {
-                    $this->RegisterVariableString($ident, $name . $caption);
+                    $this->RegisterInverterVariable(3, $ident, $name . $caption);
                 } else {
                     $profile = '';
                     if ($unit !== '') {
@@ -407,23 +482,23 @@ trait FusionSolarWebSession
                             IPS_SetVariableProfileText($profile, '', ' ' . $displayUnit);
                         }
                     }
-                    $this->RegisterVariableFloat($ident, $name . $caption, $profile);
+                    $this->RegisterInverterVariable(2, $ident, $name . $caption, $profile);
                 }
-                $this->RegisterVariableInteger($ident . '_Time', $name . $caption . ' Messzeit', '~UnixTimestamp');
+                $this->RegisterInverterVariable(1, $ident . '_Time', $name . $caption . ' Messzeit', '~UnixTimestamp');
                 if (isset($signals[$id])) {
-                    $this->SetValue($ident, $signals[$id]['value']);
-                    $this->SetValue($ident . '_Time', $signals[$id]['time']);
+                    $this->SetInverterValue($ident, $signals[$id]['value']);
+                    $this->SetInverterValue($ident . '_Time', $signals[$id]['time']);
                 } else {
                     $missing[] = $caption;
-                    $this->SetValue($ident . '_Time', 0);
+                    $this->SetInverterValue($ident . '_Time', 0);
                 }
             }
-            $this->RegisterVariableBoolean($prefix . 'Valid', $name . 'Details vollständig');
-            $this->RegisterVariableString($prefix . 'Missing', $name . 'Fehlende Details');
-            $this->RegisterVariableInteger($prefix . 'LastSuccess', $name . 'Letzter Detailabruf', '~UnixTimestamp');
-            $this->SetValue($prefix . 'Valid', $missing === []);
-            $this->SetValue($prefix . 'Missing', implode(', ', $missing));
-            $this->SetValue($prefix . 'LastSuccess', time());
+            $this->RegisterInverterVariable(0, $prefix . 'Valid', $name . 'Details vollständig');
+            $this->RegisterInverterVariable(3, $prefix . 'Missing', $name . 'Fehlende Details');
+            $this->RegisterInverterVariable(1, $prefix . 'LastSuccess', $name . 'Letzter Detailabruf', '~UnixTimestamp');
+            $this->SetInverterValue($prefix . 'Valid', $missing === []);
+            $this->SetInverterValue($prefix . 'Missing', implode(', ', $missing));
+            $this->SetInverterValue($prefix . 'LastSuccess', time());
             $complete = $complete && $missing === [];
         }
         $this->SetValue('WebInvertersValid', $complete);
