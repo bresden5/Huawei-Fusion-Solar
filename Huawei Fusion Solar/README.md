@@ -63,7 +63,7 @@ Variablen heißen `WEBINV_<Gerätenummer>_<Signal>` und liegen ab Version 1.3 im
 
 Zu jedem Signal gehört eine `_Time`-Variable mit `latestTime` von Huawei (Unix-Sekunden). Diese Zeiten können unterschiedlich alt sein, besonders bei Nennleistung oder Konfiguration. Anschalt-/Abschaltzeit werden als Website-Text gespeichert, ohne eine Zeitzone zu erraten. Ein erfolgreicher Abruf garantiert keine frischen Cloud-Messwerte.
 
-`WEBINV_<ID>_Valid` und `WebInvertersValid` zeigen an, ob alle 22 unterstützten Signale im aktuellen Abruf auswertbar waren, **nicht** ob sie aktuell sind. `_LastSuccess` ist die lokale Abrufzeit. `_Missing` listet fehlende oder unverständliche Signale. In diesem Fall bleibt der alte Einzelwert stehen, dessen `_Time` wird 0; andere gültige Einzelwerte werden aktualisiert. Modelle, die nicht alle Signale liefern, können dauerhaft „Details vollständig = false“ melden. Für Einzelwert-Automatisierungen `_Time`, `_LastSuccess` und den Verbindungsstatus prüfen.
+`WEBINV_<ID>_Valid` und `WebInvertersValid` zeigen an, ob alle 21 erforderlichen Signale im aktuellen Abruf auswertbar waren (Innentemperatur ist ab Version 1.4.1 optional), **nicht** ob sie aktuell sind. `_LastSuccess` ist die lokale Abrufzeit. `_Missing` listet fehlende oder unverständliche Signale. In diesem Fall bleibt der alte Einzelwert stehen, dessen `_Time` wird 0; andere gültige Einzelwerte werden aktualisiert. Modelle, die nicht alle Signale liefern, können dauerhaft „Details vollständig = false“ melden. Für Einzelwert-Automatisierungen `_Time`, `_LastSuccess` und den Verbindungsstatus prüfen.
 
 Bei Fehlern einer Detailanfrage stoppt der gesamte Zyklus; die Gültigkeitsanzeigen werden false. Bei Deaktivierung oder entferntem Gerät bleiben alte Variablen erhalten, sind aber nicht mehr gültig. Es werden keine Batterie- oder PV-String-Werte erfunden. Die Antwort des ersten Wechselrichters wurde vom Anwender geliefert, die Anfrage für den zweiten mit simulierten Daten geprüft; der Live-Test beider Geräte in Symcon steht noch aus.
 
@@ -120,3 +120,7 @@ mit OpenSSL einschließlich Unicode und mehrteiliger Passwörter. Tests benötig
 PHP-OpenSSL; der Kryptotest zusätzlich das OpenSSL-Kommandozeilenprogramm.
 Der vollständige Live-Anmeldetest in Windows-IP-Symcon steht noch aus. Die Funktion
 beruht auf der beobachteten Website und kann bei Huawei-Änderungen Anpassungen benötigen.
+
+### Optionale Innentemperatur (ab Version 1.4.1)
+
+Fehlt die Innentemperatur oder ist sie nicht auswertbar, bleibt die Detail-Gültigkeit bei ansonsten vollständigen Daten wahr. Unter „Fehlende Details“ steht „Innentemperatur (optional)“. Der vorhandene Temperaturwert (auch ein alter Wert von 0 °C) bleibt unverändert; `Temperature_Time` wird 0. Er ist dann kein aktueller Messwert. Die Änderungszeit der Wertvariable ist kein Nachweis einer aktuellen Messung. Liefert Huawei wieder eine gültige Temperatur, werden Wert und Messzeit aktualisiert und der Hinweis entfernt. Andere fehlende erforderliche Signale setzen die Detail-Gültigkeit weiterhin auf falsch.

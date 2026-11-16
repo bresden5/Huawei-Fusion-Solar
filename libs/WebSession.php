@@ -502,6 +502,7 @@ trait FusionSolarWebSession
             $prefix = 'WEBINV_' . $device . '_';
             $name = 'WR ' . $device . ' – ';
             $missing = [];
+            $requiredComplete = true;
             foreach ($this->InverterSignals() as $id => [$suffix, $caption, $unit, $type]) {
                 $ident = $prefix . $suffix;
                 if ($type === 'text') {
@@ -524,17 +525,20 @@ trait FusionSolarWebSession
                     $this->SetInverterValue($ident, $signals[$id]['value']);
                     $this->SetInverterValue($ident . '_Time', $signals[$id]['time']);
                 } else {
-                    $missing[] = $caption;
+                    $missing[] = $caption . ($id === 10023 ? ' (optional)' : '');
+                    if ($id !== 10023) {
+                        $requiredComplete = false;
+                    }
                     $this->SetInverterValue($ident . '_Time', 0);
                 }
             }
             $this->RegisterInverterVariable(0, $prefix . 'Valid', $name . 'Details vollständig');
             $this->RegisterInverterVariable(3, $prefix . 'Missing', $name . 'Fehlende Details');
             $this->RegisterInverterVariable(1, $prefix . 'LastSuccess', $name . 'Letzter Detailabruf', '~UnixTimestamp');
-            $this->SetInverterValue($prefix . 'Valid', $missing === []);
+            $this->SetInverterValue($prefix . 'Valid', $requiredComplete);
             $this->SetInverterValue($prefix . 'Missing', implode(', ', $missing));
             $this->SetInverterValue($prefix . 'LastSuccess', time());
-            $complete = $complete && $missing === [];
+            $complete = $complete && $requiredComplete;
         }
         $this->SetValue('WebInvertersValid', $complete);
         return count($results) . ' Wechselrichter abgerufen.' . ($complete ? '' : ' Einige Details fehlen; Messzeiten und Fehlende Details prüfen.');

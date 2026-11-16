@@ -152,6 +152,15 @@ check($m->values['WEBINV_151380680_TotalYield']===27559.25 && $m->values['WEBINV
 check($m->values['WEBINV_151380680_Status']==='Netzanschluss' && $m->values['WEBINV_151380680_Shutdown']==='2026-11-02 16:36:20','display status and date strings without guessed timezone');
 check($m->values['WEBINV_151380680_RatedPower_Time']===1793629210 && $m->values['WEBINV_151380680_ActivePower_Time']===1793687997,'retain individual signal timestamps');
 check($m->values['WebInvertersValid'] && $m->values['WEBINV_188552817_Valid'],'complete detail validity');
+// Optional temperature must not mark the required inverter data invalid.
+$deviceResponses['NE=151380680']['data'][1]['signals'] = array_values(array_filter($signals, static function ($signal) { return $signal['id'] !== 10023; }));
+$m->Update();
+check($m->values['WebInvertersValid'] && $m->values['WEBINV_151380680_Valid'], 'missing optional temperature keeps both validity flags true');
+check($m->values['WEBINV_151380680_Temperature']===11.7 && $m->values['WEBINV_151380680_Temperature_Time']===0
+    && $m->values['WEBINV_151380680_Missing']==='Innentemperatur (optional)', 'missing temperature preserves old value but clears measurement time and explains absence');
+$deviceResponses['NE=151380680']=$response;
+$m->Update();
+check($m->values['WEBINV_151380680_Temperature_Time']===1793687997 && $m->values['WEBINV_151380680_Missing']==='', 'returning temperature restores measurement time and clears missing message');
 $deviceResponses['NE=151380680']['data'][1]['signals'][3]['unit']='MW';
 $deviceResponses['NE=188552817']['data'][1]['signals'][4]['realValue']='-0.123';
 $m->Update();
