@@ -1,9 +1,9 @@
 <?php
 namespace FusionSolarTest;
 use Exception;
-// Isolierter Test ohne Netzwerk oder Symcon: php -n tests/web_session.php
+// Isolierter Test ohne Netzwerk oder Symcon: php tests/web_session.php
 
-$constants = ['CURLOPT_RETURNTRANSFER','CURLOPT_FOLLOWLOCATION','CURLOPT_CONNECTTIMEOUT','CURLOPT_TIMEOUT','CURLOPT_SSL_VERIFYPEER','CURLOPT_SSL_VERIFYHOST','CURLOPT_ENCODING','CURLOPT_COOKIEFILE','CURLOPT_USERAGENT','CURLOPT_REFERER','CURLOPT_COOKIELIST','CURLOPT_URL','CURLOPT_HTTPHEADER','CURLINFO_HTTP_CODE','CURLINFO_COOKIELIST'];
+$constants = ['CURLOPT_RETURNTRANSFER','CURLOPT_FOLLOWLOCATION','CURLOPT_CONNECTTIMEOUT','CURLOPT_TIMEOUT','CURLOPT_SSL_VERIFYPEER','CURLOPT_SSL_VERIFYHOST','CURLOPT_ENCODING','CURLOPT_COOKIEFILE','CURLOPT_USERAGENT','CURLOPT_REFERER','CURLOPT_COOKIELIST','CURLOPT_URL','CURLOPT_HTTPHEADER','CURLINFO_HTTP_CODE','CURLINFO_COOKIELIST','CURLOPT_HTTPGET','CURLOPT_POSTFIELDS','CURLOPT_HEADERFUNCTION'];
 foreach ($constants as $i => $name) { if (!defined($name)) define($name, $i + 1); }
 define('VARIABLETYPE_FLOAT', 2);
 class IPSModule {
@@ -47,11 +47,27 @@ function curl_setopt_array($ch,$options) {foreach($options as $k=>$v)curl_setopt
 function curl_setopt($ch,$k,$v) {$ch->options[$k]=$v; if($k===CURLOPT_COOKIELIST)$GLOBALS['loaded'][]=$v; return true;}
 function curl_getinfo($ch,$key) {
     if($key===CURLINFO_HTTP_CODE)return $GLOBALS['http'];
+    if (!empty($GLOBALS['loginCookies'])) return $GLOBALS['loginCookies'];
     return ["uni004eu5.fusionsolar.huawei.com\tFALSE\t/\tTRUE\t0\tJSESSIONID\trotated"];
 }
 function curl_close($ch) {}
 function curl_exec($ch) {
     $GLOBALS['calls']++;
+    if (!empty($GLOBALS['loginQueue'])) {
+        $next = array_shift($GLOBALS['loginQueue']);
+        if (strpos($ch->options[CURLOPT_URL], $next[0]) === false) throw new Exception('Unexpected login URL');
+        if (strpos($next[0], 'validateUser.action') !== false) {
+            $payload = json_decode($ch->options[CURLOPT_POSTFIELDS] ?? '', true);
+            if (($payload['username'] ?? '') !== 'test%40example.invalid' || empty($payload['password'])
+                || strpos($payload['password'], 'synthetic-only') !== false) throw new Exception('Login payload encoding');
+            if (strpos($ch->options[CURLOPT_URL], 'nonce=') === false) throw new Exception('Missing nonce');
+        } elseif (strpos($next[0], '/unisso/') !== false || strpos($next[0], 'credential-ready') !== false || strpos($next[0], 'cloud.html') !== false) {
+            if (empty($ch->options[CURLOPT_HTTPGET])) throw new Exception('Login GET method missing');
+        }
+        $GLOBALS['http'] = $next[1];
+        if (isset($next[3])) ($ch->options[CURLOPT_HEADERFUNCTION])($ch, 'Location: ' . $next[3]);
+        return $next[2];
+    }
     if(strpos($ch->options[CURLOPT_URL],'keep-alive')!==false)return json_encode(['code'=>$GLOBALS['keepCode'],'payload'=>'renewed-secret']);
     if(!in_array('roarand: renewed-secret',$ch->options[CURLOPT_HTTPHEADER],true))throw new Exception('Renewed token missing');
     if($ch->options[CURLOPT_FOLLOWLOCATION]!==false)throw new Exception('Redirects enabled');
@@ -64,8 +80,11 @@ function curl_exec($ch) {
 }
 $trait = file_get_contents(__DIR__ . '/../libs/WebSession.php');
 eval('namespace FusionSolarTest; use \RuntimeException; use \Throwable; use \DateTimeImmutable; use \DateTimeZone; ' . substr($trait, 5));
+require_once __DIR__ . '/../libs/WebLoginCrypto.php';
+$loginTrait = preg_replace('/require_once[^;]+;/', '', file_get_contents(__DIR__ . '/../libs/WebLogin.php'));
+eval('namespace FusionSolarTest; use \RuntimeException; use \FusionSolarWebLoginCrypto; ' . substr($loginTrait, 5));
 $module = file_get_contents(__DIR__ . '/../Huawei Fusion Solar/module.php');
-$module = preg_replace('/require_once[^;]+;/', '', $module, 1);
+$module = preg_replace('/require_once[^;]+;/', '', $module);
 eval('namespace FusionSolarTest; use \Throwable; use \Exception; ' . substr($module, 5));
 function check($condition,$name) {if(!$condition)throw new Exception($name); echo "PASS $name\n";}
 $flow=['nodes'=>[
@@ -160,3 +179,62 @@ check(IPS_GetName($powerID)==='Wirkleistung AC' && $objects[$unrelated]['ParentI
 $count=count($objects);$m->ApplyChanges();check(count($objects)===$count,'repeated migration creates no duplicates');
 $m->properties['WebInverterDetails']=true;$m->Update();
 check(IPS_GetObjectIDByIdent('WEBINV_151380680_ActivePower',$folder1)===$powerID && $objects[$powerID]['Value']===78.0,'subsequent polls update migrated variables');
+
+// SSO integration: synthetic key/tickets only, no external requests.
+$keyResource = openssl_pkey_new(['private_key_bits'=>3072,'private_key_type'=>OPENSSL_KEYTYPE_RSA]);
+$keyDetails = openssl_pkey_get_details($keyResource);
+$publicReply = json_encode(['enableEncrypt'=>true,'pubKey'=>$keyDetails['key'],'version'=>'00000480','timeStamp'=>1794161276257]);
+$portal = 'https://uni004eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms';
+$loginReply = ['errorCode'=>'470','respMultiRegionName'=>['-5','/rest/dp/web/v1/auth/on-sso-credential-ready?ticket=fake&regionName=region004','uni004eu5.fusionsolar.huawei.com&&fake-tgc'],'verifyCodeCreate'=>false,'twoFactorStatus'=>null];
+$loginCookies = [".fusionsolar.huawei.com\tTRUE\t/\tTRUE\t0\tdp-session\tfake-session"];
+function loginQueue($reply, $location) {
+    return [['/unisso/login.action',200,'html'],['/unisso/pubkey',200,$GLOBALS['publicReply']],
+        ['/unisso/v3/validateUser.action?',200,json_encode($reply)],
+        ['/on-sso-credential-ready?',302,'',$location],['/cloud.html',200,'html']];
+}
+$m=new HuaweiFusionSolar();$m->Create();
+$m->properties['AccessMode']='web';$m->properties['WebStation']='NE=151380676';
+$m->properties['WebAutoLogin']=true;$m->properties['WebUsername']='test@example.invalid';$m->properties['WebPassword']='synthetic-only';
+$http=200;$keepCode=0;$loginQueue=loginQueue($loginReply,$portal);
+$m->RequestAction('Update',0);
+check($m->values['WebDataValid'] && $loginQueue===[] && !$m->attributes['WebLoginBlocked'],'automatic initial login, ticket exchange and token bootstrap');
+check(strpos($m->attributes['WebSession'],'fake-session')!==false && $m->timers['UpdateTimer']===300000,'automatic login cookies persisted and polling started');
+$m->attributes['WebLoginAttempt']=0;
+$loginQueue=array_merge([['keep-alive',302,'']],loginQueue($loginReply,$portal));
+$m->Update();
+check($m->values['WebDataValid'] && $loginQueue===[],'expired session reauthenticates within same polling cycle');
+$before=$calls;$http=302;$m->Update();
+check($calls===$before+1 && $m->timers['UpdateTimer']===0,'cooldown prevents repeated password submissions');
+$http=200;$m->attributes['WebLoginAttempt']=0;
+$bad=$loginReply;$bad['verifyCodeCreate']=true;
+$loginQueue=array_slice(loginQueue($bad,$portal),0,3);
+$m->RequestAction('Update',0);
+check($m->status===201 && $m->attributes['WebLoginBlocked'] && $loginQueue===[],'CAPTCHA stops login before ticket exchange');
+$m->ApplyChanges();check($m->timers['UpdateTimer']===0,'failed login remains stopped after ApplyChanges');
+$m->attributes['WebLoginAttempt']=0;
+$loginQueue=array_slice(loginQueue($loginReply,'https://attacker.invalid/steal'),0,4);
+$m->RequestAction('Update',0);
+check($m->status===201 && $loginQueue===[] && $m->attributes['WebSession']==='','foreign redirect rejected without navigation or session persistence');
+$m->attributes['WebLoginAttempt']=0;
+$bad=$loginReply;$bad['respMultiRegionName'][1]='https://attacker.invalid/ticket';
+$loginQueue=array_slice(loginQueue($bad,$portal),0,3);$m->RequestAction('Update',0);
+check($m->status===201 && $loginQueue===[],'foreign ticket endpoint rejected');
+$m->attributes['WebLoginAttempt']=0;$loginQueue=loginQueue($loginReply,$portal);$m->RequestAction('Update',0);
+$m->RequestAction('ForgetWebSession',0);$m->ApplyChanges();
+check($m->timers['UpdateTimer']===0 && $m->attributes['WebStopped'],'manual stop persists even with automatic login enabled');
+$m->attributes['WebLoginAttempt']=0;$loginQueue=loginQueue($loginReply,$portal);$keepCode=1;
+$m->RequestAction('Update',0);
+check($m->status===201 && $loginQueue===[] && $m->timers['UpdateTimer']===0,'failed token bootstrap does not trigger a second login');
+
+$keepCode=0;$m->attributes['WebLoginAttempt']=0;
+$bad=$loginReply;$bad['respMultiRegionName'][0]='-7';
+$loginQueue=array_slice(loginQueue($bad,$portal),0,3);$m->RequestAction('Update',0);
+check($m->status===201 && $loginQueue===[], 'regional two-factor challenge stops without requesting a code');
+$m->attributes['WebLoginAttempt']=0;
+$bad=$loginReply;$bad['errorCode']='401';
+$loginQueue=array_slice(loginQueue($bad,$portal),0,3);$m->RequestAction('Update',0);
+check($m->status===201 && $m->attributes['WebLoginBlocked'] && $loginQueue===[], 'rejected credentials stop after one attempt');
+$m->attributes['WebLoginAttempt']=0;$loginCookies=[];
+$loginQueue=array_slice(loginQueue($loginReply,$portal),0,4);$m->RequestAction('Update',0);
+check($m->status===201 && $loginQueue===[], 'missing regional session cookie rejects login');
+check(strpos($m->values['ConnectionStatus'], 'fake')===false && strpos($m->values['ConnectionStatus'],'synthetic-only')===false, 'login status contains no credentials or tickets');

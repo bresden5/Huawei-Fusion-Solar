@@ -1,10 +1,12 @@
 <?php
 
 require_once __DIR__ . "/../libs/WebSession.php";
+require_once __DIR__ . "/../libs/WebLogin.php";
 
 class HuaweiFusionSolar extends IPSModule
 {
     use FusionSolarWebSession;
+    use FusionSolarWebLogin;
     public function Create()
     {
         parent::Create();
@@ -20,6 +22,12 @@ class HuaweiFusionSolar extends IPSModule
         $this->RegisterAttributeString('WebInverterIDs', '[]');
         $this->RegisterVariableBoolean('WebInvertersValid', 'Wechselrichterdetails gültig');
         $this->RegisterAttributeString('WebSession', '');
+        $this->RegisterPropertyBoolean('WebAutoLogin', false);
+        $this->RegisterPropertyString('WebUsername', '');
+        $this->RegisterPropertyString('WebPassword', '');
+        $this->RegisterAttributeInteger('WebLoginAttempt', 0);
+        $this->RegisterAttributeBoolean('WebLoginBlocked', false);
+        $this->RegisterAttributeBoolean('WebStopped', false);
         $this->RegisterVariableBoolean('WebDataValid', 'Website-Werte gültig');
         $this->RegisterVariableInteger('LastWebSuccess', 'Letzter Website-Abruf', '~UnixTimestamp');
         $this->RegisterVariableString('ConnectionStatus', 'Verbindungsstatus');
@@ -84,6 +92,8 @@ class HuaweiFusionSolar extends IPSModule
             return;
         }
         if ($Ident === 'Update') {
+            $this->WriteAttributeBoolean('WebStopped', false);
+            $this->WriteAttributeBoolean('WebLoginBlocked', false);
             $this->Update();
             return;
         }

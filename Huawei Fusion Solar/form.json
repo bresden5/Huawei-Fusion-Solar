@@ -17,7 +17,7 @@
     },
     {
       "type": "Label",
-      "caption": "Website: Domain und Anlagenkennung eintragen, übernehmen und unten Sitzung importieren. API-Felder werden im Website-Modus nicht verwendet."
+      "caption": "Website: Domain und Anlagenkennung eintragen. Automatische Anmeldung aktivieren oder unten eine Sitzung importieren. API-Felder gelten nur im API-Modus."
     },
     {
       "type": "ValidationTextBox",
@@ -33,6 +33,21 @@
       "type": "CheckBox",
       "name": "WebInverterDetails",
       "caption": "Website: Wechselrichterdetails abrufen (eine zusätzliche Anfrage je Gerät)"
+    },
+    {
+      "type": "CheckBox",
+      "name": "WebAutoLogin",
+      "caption": "Website: automatisch anmelden (EU5, ohne CAPTCHA/Zwei-Faktor)"
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "WebUsername",
+      "caption": "Website-Benutzername / E-Mail"
+    },
+    {
+      "type": "PasswordTextBox",
+      "name": "WebPassword",
+      "caption": "Website-Passwort"
     },
     {
       "type": "ValidationTextBox",
@@ -70,7 +85,7 @@
     },
     {
       "type": "Label",
-      "caption": "Sitzung nur lokal eingeben. Speicherung in Symcon-Attributen, nicht verschlüsselt; auch Backups schützen. Keine automatische Neuanmeldung."
+      "caption": "Zugangsdaten und Sitzung werden lokal in Symcon gespeichert, nicht zusätzlich verschlüsselt; auch Backups schützen. Nach fehlgeschlagener Anmeldung stoppt der Abruf."
     },
     {
       "type": "PasswordTextBox",

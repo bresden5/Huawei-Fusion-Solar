@@ -30,10 +30,17 @@ trait FusionSolarWebSession
         $this->SetTimerInterval('UpdateTimer', 0);
         try {
             [$origin, $station] = $this->WebConfiguration();
+            if ($this->ReadAttributeBoolean('WebStopped') || $this->ReadAttributeBoolean('WebLoginBlocked')) {
+                $this->WebStatus('Website-Abruf gestoppt. Zum Fortsetzen Jetzt aktualisieren verwenden.', 201);
+                return;
+            }
             $session = json_decode($this->ReadAttributeString('WebSession'), true);
             if (!is_array($session) || ($session['origin'] ?? '') !== $origin || ($session['station'] ?? '') !== $station) {
                 $this->WriteAttributeString('WebSession', '');
-                $this->WebStatus('Website-Sitzung erforderlich: Cookie und roarand importieren.', 201);
+                $this->WebStatus('Website-Sitzung erforderlich: automatisch anmelden oder Sitzung importieren.', 201);
+                if ($this->ReadPropertyBoolean('WebAutoLogin')) {
+                    $this->SetTimerInterval('UpdateTimer', max(300, $this->ReadPropertyInteger('UpdateInterval')) * 1000);
+                }
                 return;
             }
             if ($session['paused'] ?? false) {
@@ -76,6 +83,8 @@ trait FusionSolarWebSession
                 'origin' => $origin, 'station' => $station, 'cookies' => $cookies,
                 'token' => $token, 'paused' => false
             ], JSON_THROW_ON_ERROR));
+            $this->WriteAttributeBoolean('WebStopped', false);
+            $this->WriteAttributeBoolean('WebLoginBlocked', false);
             $this->UpdateFormField('CookieInput', 'value', '');
             $this->UpdateFormField('TokenInput', 'value', '');
             $this->ConfigureWeb();
@@ -95,6 +104,7 @@ trait FusionSolarWebSession
             $this->WriteAttributeString('WebSession', '');
             if ($this->ReadPropertyString('AccessMode') === 'web') {
                 $this->SetTimerInterval('UpdateTimer', 0);
+                $this->WriteAttributeBoolean('WebStopped', true);
                 $this->WebStatus('Website-Sitzung lokal entfernt.', 201);
             }
         } finally {
@@ -105,8 +115,11 @@ trait FusionSolarWebSession
     // Kein Redirect-Following: Sitzungsdaten niemals an ein anderes Ziel senden.
     private function WebGet($ch, string $url, string $token, bool $energy): array
     {
-        $headers = ['Accept: application/json', 'Accept-Language: de,en;q=0.8', 'roarand: ' . $token,
+        $headers = ['Accept: application/json', 'Accept-Language: de,en;q=0.8',
             'Sec-Fetch-Dest: empty', 'Sec-Fetch-Mode: cors', 'Sec-Fetch-Site: same-origin'];
+        if ($token !== '') {
+            $headers[] = 'roarand: ' . $token;
+        }
         if ($energy) {
             $headers[] = 'X-Requested-With: XMLHttpRequest';
             $headers[] = 'x-non-renewal-session: true';
@@ -143,51 +156,73 @@ trait FusionSolarWebSession
         try {
             [$origin, $station] = $this->WebConfiguration();
             $session = json_decode($this->ReadAttributeString('WebSession'), true);
-            if (!is_array($session) || ($session['origin'] ?? '') !== $origin || ($session['station'] ?? '') !== $station
-                || !is_array($session['cookies'] ?? null) || !is_string($session['token'] ?? null) || $session['token'] === '') {
-                throw new RuntimeException('Website-Sitzung fehlt. Bitte neu importieren.', 201);
+            $loginAttempted = false;
+            for ($attempt = 0; $attempt < 2; $attempt++) {
+                try {
+                    if ($ch !== null) {
+                        curl_close($ch);
+                        $ch = null;
+                    }
+                    if (!function_exists('curl_init')) {
+                        throw new RuntimeException('PHP-cURL ist nicht verfügbar.');
+                    }
+                    $ch = curl_init();
+                    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false,
+                        CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 25,
+                        CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2, CURLOPT_ENCODING => '',
+                        CURLOPT_COOKIEFILE => '',
+                        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0',
+                        CURLOPT_REFERER => $origin . '/uniportal/pvmswebsite/assets/build/cloud.html']);
+                    if (!is_array($session) || ($session['origin'] ?? '') !== $origin || ($session['station'] ?? '') !== $station
+                        || !is_array($session['cookies'] ?? null) || !is_string($session['token'] ?? null) || $session['token'] === '') {
+                        $loginAttempted = true;
+                        $session = $this->LoginWeb($ch, $origin, $station);
+                    } else {
+                        foreach ($session['cookies'] as $line) {
+                            curl_setopt($ch, CURLOPT_COOKIELIST, $line);
+                        }
+                    }
+                    $keep = $this->WebGet($ch, $origin . '/rest/dpcloud/auth/v1/keep-alive', $session['token'], false);
+                    if (($keep['code'] ?? null) !== 0 || !is_string($keep['payload'] ?? null) || $keep['payload'] === ''
+                        || preg_match('/[\x00-\x20\x7f]/', $keep['payload'])) {
+                        throw new RuntimeException('Keep-alive nicht bestätigt. Sitzung neu importieren.', 201);
+                    }
+                    $session['token'] = $keep['payload'];
+                    $this->WriteAttributeBoolean('WebLoginBlocked', false);
+                    $query = http_build_query(['stationDn' => $station, 'featureId' => 'aifc', '_' => sprintf('%.0f', microtime(true) * 1000)], '', '&', PHP_QUERY_RFC3986);
+                    $data = $this->WebGet($ch, $origin . '/rest/pvms/web/station/v3/overview/energy-flow?' . $query, $session['token'], true);
+                    if (($data['success'] ?? null) !== true || ($data['failCode'] ?? null) !== 0) {
+                        throw new RuntimeException('Energiefluss-Abfrage nicht bestätigt. Sitzung und Berechtigungen prüfen.');
+                    }
+                    $values = $this->ParseWebFlow($data['data']['flow'] ?? []);
+                    $detailMessage = 'Wechselrichterdetails deaktiviert.';
+                    $this->InvalidateWebInverters();
+                    if ($this->ReadPropertyBoolean('WebInverterDetails')) {
+                        $detailMessage = $this->UpdateWebInverters($ch, $origin, $session['token'], $data['data']['flow']);
+                    }
+                    foreach ($values as $ident => $value) {
+                        $this->SetValue($ident, $value);
+                    }
+                    $session['cookies'] = curl_getinfo($ch, CURLINFO_COOKIELIST);
+                    $session['paused'] = false;
+                    $this->WriteAttributeString('WebSession', json_encode($session, JSON_THROW_ON_ERROR));
+                    $this->SetValue('LastWebSuccess', time());
+                    $this->WebStatus('Website verbunden. Batterie nicht verfügbar. ' . $detailMessage, 102, true);
+                    $this->SetTimerInterval('UpdateTimer', max(300, $this->ReadPropertyInteger('UpdateInterval')) * 1000);
+                    break;
+                } catch (Throwable $error) {
+                    if ($error->getCode() !== 201 || $loginAttempted || !$this->ReadPropertyBoolean('WebAutoLogin')) {
+                        throw $error;
+                    }
+                    $session = null;
+                    $this->WriteAttributeString('WebSession', '');
+                }
             }
-            if (!function_exists('curl_init')) {
-                throw new RuntimeException('PHP-cURL ist nicht verfügbar.');
-            }
-            $ch = curl_init();
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false,
-                CURLOPT_CONNECTTIMEOUT => 10, CURLOPT_TIMEOUT => 25,
-                CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2, CURLOPT_ENCODING => '',
-                CURLOPT_COOKIEFILE => '',
-                CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:158.0) Gecko/20100101 Firefox/158.0',
-                CURLOPT_REFERER => $origin . '/uniportal/pvmswebsite/assets/build/cloud.html']);
-            foreach ($session['cookies'] as $line) {
-                curl_setopt($ch, CURLOPT_COOKIELIST, $line);
-            }
-            $keep = $this->WebGet($ch, $origin . '/rest/dpcloud/auth/v1/keep-alive', $session['token'], false);
-            if (($keep['code'] ?? null) !== 0 || !is_string($keep['payload'] ?? null) || $keep['payload'] === ''
-                || preg_match('/[\x00-\x20\x7f]/', $keep['payload'])) {
-                throw new RuntimeException('Keep-alive nicht bestätigt. Sitzung neu importieren.', 201);
-            }
-            $session['token'] = $keep['payload'];
-            $query = http_build_query(['stationDn' => $station, 'featureId' => 'aifc', '_' => sprintf('%.0f', microtime(true) * 1000)], '', '&', PHP_QUERY_RFC3986);
-            $data = $this->WebGet($ch, $origin . '/rest/pvms/web/station/v3/overview/energy-flow?' . $query, $session['token'], true);
-            if (($data['success'] ?? null) !== true || ($data['failCode'] ?? null) !== 0) {
-                throw new RuntimeException('Energiefluss-Abfrage nicht bestätigt. Sitzung und Berechtigungen prüfen.');
-            }
-            $values = $this->ParseWebFlow($data['data']['flow'] ?? []);
-            $detailMessage = 'Wechselrichterdetails deaktiviert.';
-            $this->InvalidateWebInverters();
-            if ($this->ReadPropertyBoolean('WebInverterDetails')) {
-                $detailMessage = $this->UpdateWebInverters($ch, $origin, $session['token'], $data['data']['flow']);
-            }
-            foreach ($values as $ident => $value) {
-                $this->SetValue($ident, $value);
-            }
-            $session['cookies'] = curl_getinfo($ch, CURLINFO_COOKIELIST);
-            $session['paused'] = false;
-            $this->WriteAttributeString('WebSession', json_encode($session, JSON_THROW_ON_ERROR));
-            $this->SetValue('LastWebSuccess', time());
-            $this->WebStatus('Website verbunden. Batterie nicht verfügbar. ' . $detailMessage, 102, true);
-            $this->SetTimerInterval('UpdateTimer', max(300, $this->ReadPropertyInteger('UpdateInterval')) * 1000);
         } catch (Throwable $e) {
             if ($e->getCode() === 201) {
+                if (($loginAttempted ?? false) && $this->ReadPropertyBoolean('WebAutoLogin')) {
+                    $this->WriteAttributeBoolean('WebLoginBlocked', true);
+                }
                 $this->WriteAttributeString('WebSession', '');
             } elseif (is_array($session)) {
                 if ($ch !== null) {
