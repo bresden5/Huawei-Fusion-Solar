@@ -53,6 +53,7 @@ function curl_getinfo($ch,$key) {
 function curl_close($ch) {}
 function curl_exec($ch) {
     $GLOBALS['calls']++;
+    if (!empty($GLOBALS['offline'])) return false;
     if (!empty($GLOBALS['loginQueue'])) {
         $next = array_shift($GLOBALS['loginQueue']);
         if (strpos($ch->options[CURLOPT_URL], $next[0]) === false) throw new Exception('Unexpected login URL');
@@ -213,7 +214,7 @@ $loginQueue=array_merge([['keep-alive',302,'']],loginQueue($loginReply,$portal))
 $m->Update();
 check($m->values['WebDataValid'] && $loginQueue===[],'expired session reauthenticates within same polling cycle');
 $before=$calls;$http=302;$m->Update();
-check($calls===$before+1 && $m->timers['UpdateTimer']===0,'cooldown prevents repeated password submissions');
+check($calls===$before+1 && $m->status===203 && $m->timers['UpdateTimer']>0,'cooldown prevents repeated password submissions');
 $http=200;$m->attributes['WebLoginAttempt']=0;
 $bad=$loginReply;$bad['verifyCodeCreate']=true;
 $loginQueue=array_slice(loginQueue($bad,$portal),0,3);
@@ -247,3 +248,27 @@ $m->attributes['WebLoginAttempt']=0;$loginCookies=[];
 $loginQueue=array_slice(loginQueue($loginReply,$portal),0,4);$m->RequestAction('Update',0);
 check($m->status===201 && $loginQueue===[], 'missing regional session cookie rejects login');
 check(strpos($m->values['ConnectionStatus'], 'fake')===false && strpos($m->values['ConnectionStatus'],'synthetic-only')===false, 'login status contains no credentials or tickets');
+
+// Transient failures must survive a process restart without a manual action.
+$loginCookies=[".fusionsolar.huawei.com\tTRUE\t/\tTRUE\t0\tdp-session\tfake-session"];
+$m->attributes['WebLoginAttempt']=0;$loginQueue=loginQueue($loginReply,$portal);$m->RequestAction('Update',0);
+$previous=$m->values['LastWebSuccess'];$offline=true;$before=$calls;$m->RequestAction('Poll',0);
+check($m->status===203 && $calls===$before+1 && $m->timers['UpdateTimer']>=299000 && !$m->values['WebDataValid'] && $m->values['LastWebSuccess']===$previous,'network outage schedules retry without changing last success');
+$restart=new HuaweiFusionSolar();$restart->Create();$restart->properties=$m->properties;$restart->attributes=$m->attributes;$m=$restart;$m->ApplyChanges();
+check($m->timers['UpdateTimer']>0 && $m->status===203,'restart restores pending retry from persistent attributes');
+$offline=false;$http=200;$m->RequestAction('Poll',0);
+check($m->values['WebDataValid'] && $m->attributes['WebRetryAt']===0 && $m->timers['UpdateTimer']===300000,'timer recovers existing session after reconnect');
+foreach ([408,429,503] as $temporaryStatus) {
+    $http=$temporaryStatus;$m->RequestAction('Poll',0);
+    check($m->status===203 && $m->timers['UpdateTimer']>0,'temporary HTTP status retries: '.$temporaryStatus);
+}
+$http=200;$m->RequestAction('Poll',0);$m->ApplyChanges();
+check($m->timers['UpdateTimer']===300000,'healthy session resumes after ApplyChanges');
+$m->attributes['WebSession']='';$m->attributes['WebLoginAttempt']=0;$offline=true;$m->RequestAction('Poll',0);
+check($m->status===203 && !$m->attributes['WebLoginBlocked'] && $m->timers['UpdateTimer']>=599000,'login network failure schedules retry respecting login cooldown');
+$offline=false;$m->attributes['WebLoginAttempt']=0;$loginQueue=loginQueue($loginReply,$portal);$m->RequestAction('Poll',0);
+check($m->values['WebDataValid'],'timer logs in after connection returns');
+$m->RequestAction('ForgetWebSession',0);$before=$calls;$m->RequestAction('Poll',0);$m->ApplyChanges();
+check($calls===$before && $m->timers['UpdateTimer']===0,'queued timer and restart respect manual stop');
+$m->attributes['WebStopped']=false;$m->attributes['WebLoginBlocked']=true;$m->RequestAction('Poll',0);
+check($calls===$before && $m->attributes['WebLoginBlocked'],'timer never clears rejected-login block');

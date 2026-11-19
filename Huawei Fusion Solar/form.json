@@ -125,6 +125,11 @@
       "code": 202,
       "icon": "error",
       "caption": "Website-Abruf gestoppt; Konfiguration oder Daten prüfen"
+    },
+    {
+      "code": 203,
+      "icon": "error",
+      "caption": "Verbindung unterbrochen; automatischer Wiederholungsversuch geplant"
     }
   ]
 }

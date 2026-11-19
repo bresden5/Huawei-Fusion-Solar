@@ -10,7 +10,7 @@ trait FusionSolarWebLogin
             throw new RuntimeException('Website-Sitzung fehlt. Bitte importieren oder automatische Anmeldung aktivieren.', 201);
         }
         if (time() - $this->ReadAttributeInteger('WebLoginAttempt') < 600) {
-            throw new RuntimeException('Anmeldung pausiert: mindestens zehn Minuten seit dem letzten Versuch warten.', 201);
+            throw new RuntimeException('Anmeldung pausiert: mindestens zehn Minuten seit dem letzten Versuch warten.', 203);
         }
         $username = trim($this->ReadPropertyString('WebUsername'));
         $password = $this->ReadPropertyString('WebPassword');
@@ -118,7 +118,10 @@ trait FusionSolarWebLogin
         curl_setopt($ch, CURLOPT_HEADERFUNCTION, static function ($handle, string $line): int {return strlen($line);});
         curl_setopt($ch, CURLOPT_POSTFIELDS, '');
         curl_setopt($ch, CURLOPT_HTTPGET, true);
-        if ($body === false || ($status !== 200 && !($redirect && $status === 302))) {
+        if ($body === false || $status === 408 || $status === 429 || $status >= 500) {
+            throw new RuntimeException('Website-Anmeldung vorübergehend nicht erreichbar (HTTP ' . $status . ').', 203);
+        }
+        if ($status !== 200 && !($redirect && $status === 302)) {
             throw new RuntimeException('Website-Anmeldung fehlgeschlagen (HTTP ' . $status . '). Automatische Versuche gestoppt.', 201);
         }
         return [$status, $body, $location];

@@ -39,7 +39,7 @@ Bei fehlenden Werten, unbekannten Einheiten oder unklarer Flussrichtung bleiben 
 ## Fehler / Sitzung erneuern
 
 - Status 201: Sitzung fehlt oder wurde abgewiesen (auch Weiterleitung / HTTP 401 / 403). Bei aktivierter automatischer Anmeldung erfolgt bei Sitzungsablauf ein Anmeldeversuch. Scheitert dieser, Ursache im Verbindungsstatus prüfen. Alternativ im Browser anmelden und eine aktuelle Sitzung importieren.
-- Status 202: Konfiguration, Netzwerk oder Antwortformat prüfen. Der Abruf ist gestoppt. **Jetzt aktualisieren** versucht einmal erneut und startet bei Erfolg den Timer wieder.
+- Status 202: Konfiguration oder Antwortformat prüfen. Der Abruf ist gestoppt. **Jetzt aktualisieren** versucht einmal erneut und startet bei Erfolg den Timer wieder.
 - **Website-Sitzung entfernen / Abruf stoppen** löscht nur den lokalen Sitzungsspeicher. Es wird kein Huawei-Logout ausgelöst. Zum serverseitigen Abmelden den Browser verwenden.
 
 CAPTCHA, Zwei-Faktor-Bestätigung, erzwungene Passwortänderung und Anlagensteuerung werden nicht automatisiert. Die Website kann eine absolute Sitzungsgrenze erzwingen oder ihre Schnittstelle ändern. Ein erfolgreicher Keep-alive ist kein Nachweis unbegrenzter Gültigkeit. Die Aktualisierungsverzögerung der Cloud-Daten ist unbekannt.
@@ -110,7 +110,7 @@ Gespeicherte Zugangsdaten werden durch das Entfernen der Sitzung nicht gelöscht
 
 Die Anmeldung folgt ausschließlich der geprüften Weiterleitung zur konfigurierten
 Anlagenübersicht. Unbekannte Ziele oder Antwortformate stoppen den Ablauf.
-Netzwerkfehler und sonstige Datenfehler lösen keine wiederholten Passwortanmeldungen aus.
+Bei vorübergehenden Netzwerkfehlern erfolgt ab Version 1.4.2 ein automatischer Wiederholungsversuch. Sonstige Datenfehler stoppen den Abruf weiterhin.
 Der rohe Antwortinhalt, Cookies, Tickets und Passwörter werden nicht protokolliert.
 
 Offline geprüft: erfolgreicher Ablauf, Sitzungsablauf, Wiederanmeldung, Wartezeit,
@@ -124,3 +124,25 @@ beruht auf der beobachteten Website und kann bei Huawei-Änderungen Anpassungen 
 ### Optionale Innentemperatur (ab Version 1.4.1)
 
 Fehlt die Innentemperatur oder ist sie nicht auswertbar, bleibt die Detail-Gültigkeit bei ansonsten vollständigen Daten wahr. Unter „Fehlende Details“ steht „Innentemperatur (optional)“. Der vorhandene Temperaturwert (auch ein alter Wert von 0 °C) bleibt unverändert; `Temperature_Time` wird 0. Er ist dann kein aktueller Messwert. Die Änderungszeit der Wertvariable ist kein Nachweis einer aktuellen Messung. Liefert Huawei wieder eine gültige Temperatur, werden Wert und Messzeit aktualisiert und der Hinweis entfernt. Andere fehlende erforderliche Signale setzen die Detail-Gültigkeit weiterhin auf falsch.
+
+## Wiederaufnahme nach Internetunterbrechung oder Neustart (ab Version 1.4.2)
+
+Bei Transportfehlern (z. B. DNS, Verbindungsabbruch oder Timeout) und HTTP 408, 429
+oder 5xx bleibt die Sitzung gespeichert. Status 203 zeigt den geplanten automatischen
+Wiederholungsversuch an. Er erfolgt nach dem konfigurierten Intervall, mindestens
+fünf Minuten. Bei einer unterbrochenen Anmeldung wird zusätzlich der Mindestabstand
+von zehn Minuten eingehalten. Eine reine Anmeldepause wird automatisch abgewartet.
+Bei Erfolg läuft der normale Abruf weiter; bei abgelaufener Sitzung greift die
+aktivierte automatische Anmeldung. Ohne diese Option ist bei einer abgelaufenen
+Sitzung weiterhin ein manueller Import erforderlich.
+
+Nach einem Symcon-Neustart wird der Timer aus der gespeicherten Konfiguration und
+dem Wiederholungszeitpunkt wiederhergestellt. Alte Messwerte bleiben bei einem
+Fehler erhalten, ihre Gültigkeitsanzeigen werden jedoch falsch. Falsche Zugangsdaten,
+CAPTCHA, unbekannte Antwortformate und ein bewusster manueller Stopp bleiben Gründe
+für einen dauerhaften Stopp. Der Timer darf diese Sperren nicht aufheben.
+
+Nach dem Update einmal **Jetzt aktualisieren** verwenden, falls die alte Version
+bereits einen dauerhaften Stopp gespeichert hat. Solche alten Stopps lassen sich
+nicht zuverlässig von anderen Fehlerursachen unterscheiden. Danach sind für die
+oben genannten vorübergehenden Fehler keine manuellen Neustarts des Abrufs nötig.

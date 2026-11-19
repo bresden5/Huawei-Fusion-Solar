@@ -28,6 +28,7 @@ class HuaweiFusionSolar extends IPSModule
         $this->RegisterAttributeInteger('WebLoginAttempt', 0);
         $this->RegisterAttributeBoolean('WebLoginBlocked', false);
         $this->RegisterAttributeBoolean('WebStopped', false);
+        $this->RegisterAttributeInteger('WebRetryAt', 0);
         $this->RegisterVariableBoolean('WebDataValid', 'Website-Werte gültig');
         $this->RegisterVariableInteger('LastWebSuccess', 'Letzter Website-Abruf', '~UnixTimestamp');
         $this->RegisterVariableString('ConnectionStatus', 'Verbindungsstatus');
@@ -45,7 +46,7 @@ class HuaweiFusionSolar extends IPSModule
         $this->RegisterTimer(
             "UpdateTimer",
             0,
-            "IPS_RequestAction(" . $this->InstanceID . ", 'Update', 0);"
+            "IPS_RequestAction(" . $this->InstanceID . ", 'Poll', 0);"
         );
 
         // === Variablen ===
@@ -89,6 +90,15 @@ class HuaweiFusionSolar extends IPSModule
         }
         if ($Ident === 'ForgetWebSession') {
             $this->ForgetWebSession();
+            return;
+        }
+        if ($Ident === 'Poll') {
+            if ($this->ReadPropertyString('AccessMode') === 'web'
+                && ($this->ReadAttributeBoolean('WebStopped') || $this->ReadAttributeBoolean('WebLoginBlocked'))) {
+                $this->SetTimerInterval('UpdateTimer', 0);
+                return;
+            }
+            $this->Update();
             return;
         }
         if ($Ident === 'Update') {

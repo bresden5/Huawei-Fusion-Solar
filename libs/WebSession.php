@@ -25,6 +25,13 @@ trait FusionSolarWebSession
         $this->SetStatus($status);
     }
 
+    private function ScheduleWebRetry(string $message): void
+    {
+        $seconds = max(1, $this->ReadAttributeInteger('WebRetryAt') - time());
+        $this->WebStatus($message . ' Automatischer Wiederholungsversuch in ' . $seconds . ' Sekunden.', 203);
+        $this->SetTimerInterval('UpdateTimer', $seconds * 1000);
+    }
+
     private function ConfigureWeb(): void
     {
         $this->SetTimerInterval('UpdateTimer', 0);
@@ -32,6 +39,10 @@ trait FusionSolarWebSession
             [$origin, $station] = $this->WebConfiguration();
             if ($this->ReadAttributeBoolean('WebStopped') || $this->ReadAttributeBoolean('WebLoginBlocked')) {
                 $this->WebStatus('Website-Abruf gestoppt. Zum Fortsetzen Jetzt aktualisieren verwenden.', 201);
+                return;
+            }
+            if ($this->ReadAttributeInteger('WebRetryAt') > 0) {
+                $this->ScheduleWebRetry('Verbindung wird nach Unterbrechung erneut geprüft.');
                 return;
             }
             $session = json_decode($this->ReadAttributeString('WebSession'), true);
@@ -83,6 +94,7 @@ trait FusionSolarWebSession
                 'origin' => $origin, 'station' => $station, 'cookies' => $cookies,
                 'token' => $token, 'paused' => false
             ], JSON_THROW_ON_ERROR));
+            $this->WriteAttributeInteger('WebRetryAt', 0);
             $this->WriteAttributeBoolean('WebStopped', false);
             $this->WriteAttributeBoolean('WebLoginBlocked', false);
             $this->UpdateFormField('CookieInput', 'value', '');
@@ -104,6 +116,7 @@ trait FusionSolarWebSession
             $this->WriteAttributeString('WebSession', '');
             if ($this->ReadPropertyString('AccessMode') === 'web') {
                 $this->SetTimerInterval('UpdateTimer', 0);
+                $this->WriteAttributeInteger('WebRetryAt', 0);
                 $this->WriteAttributeBoolean('WebStopped', true);
                 $this->WebStatus('Website-Sitzung lokal entfernt.', 201);
             }
@@ -128,11 +141,14 @@ trait FusionSolarWebSession
         curl_setopt_array($ch, [CURLOPT_URL => $url, CURLOPT_HTTPHEADER => $headers]);
         $body = curl_exec($ch);
         if ($body === false) {
-            throw new RuntimeException('Netzwerkfehler beim Website-Abruf.');
+            throw new RuntimeException('Netzwerkfehler beim Website-Abruf.', 203);
         }
         $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if (($http >= 300 && $http < 400) || $http === 401 || $http === 403) {
             throw new RuntimeException('Website-Sitzung nicht mehr nutzbar. Im Browser anmelden und Sitzung neu importieren.', 201);
+        }
+        if ($http === 408 || $http === 429 || $http >= 500) {
+            throw new RuntimeException('Website vorübergehend nicht erreichbar (HTTP ' . $http . ').', 203);
         }
         if ($http !== 200) {
             throw new RuntimeException('Website HTTP-Status ' . $http . '; Abruf gestoppt.');
@@ -205,6 +221,7 @@ trait FusionSolarWebSession
                     }
                     $session['cookies'] = curl_getinfo($ch, CURLINFO_COOKIELIST);
                     $session['paused'] = false;
+                    $this->WriteAttributeInteger('WebRetryAt', 0);
                     $this->WriteAttributeString('WebSession', json_encode($session, JSON_THROW_ON_ERROR));
                     $this->SetValue('LastWebSuccess', time());
                     $this->WebStatus('Website verbunden. Batterie nicht verfügbar. ' . $detailMessage, 102, true);
@@ -219,6 +236,21 @@ trait FusionSolarWebSession
                 }
             }
         } catch (Throwable $e) {
+            if ($e->getCode() === 203) {
+                if (is_array($session)) {
+                    if ($ch !== null) $session['cookies'] = curl_getinfo($ch, CURLINFO_COOKIELIST);
+                    $session['paused'] = false;
+                    $this->WriteAttributeString('WebSession', json_encode($session));
+                }
+                $this->WriteAttributeBoolean('WebLoginBlocked', false);
+                $this->WriteAttributeInteger('WebRetryAt', max(
+                    time() + max(300, $this->ReadPropertyInteger('UpdateInterval')),
+                    ($loginAttempted ?? false) ? $this->ReadAttributeInteger('WebLoginAttempt') + 600 : 0
+                ));
+                $this->ScheduleWebRetry($e->getMessage());
+                return;
+            }
+            $this->WriteAttributeInteger('WebRetryAt', 0);
             if ($e->getCode() === 201) {
                 if (($loginAttempted ?? false) && $this->ReadPropertyBoolean('WebAutoLogin')) {
                     $this->WriteAttributeBoolean('WebLoginBlocked', true);
